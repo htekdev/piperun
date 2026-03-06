@@ -167,7 +167,7 @@ export const deploymentStrategySchema = z.object({
 
 // Job strategy
 export const jobStrategySchema = z.object({
-  matrix: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  matrix: z.record(z.string(), z.record(z.string(), z.coerce.string())).optional(),
   parallel: z.number().optional(),
   maxParallel: z.number().optional(),
 });

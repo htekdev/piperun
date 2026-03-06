@@ -600,10 +600,10 @@ stages:
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Matrix Strategy', () => {
-    it('19. matrix with 2 configs — both combinations run', { timeout: 30_000 }, async () => {
-      vi.spyOn(console, 'log').mockImplementation(() => {});
+    it('19. matrix with 2 configs — both instances run with correct variables', { timeout: 30_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-      const file = await writePipeline('matrix.yaml', `
+      const file = await writePipeline('matrix-2cfg.yaml', `
 name: MatrixPipeline
 stages:
   - stage: Build
@@ -616,14 +616,177 @@ stages:
             windows:
               os: windows
         steps:
-          - pwsh: Write-Host "Building on $(os)"
+          - pwsh: Write-Host "Building on $env:OS"
 `);
       const result = await runPipeline(file);
 
-      // Even without full matrix expansion in the runner (it's in strategy-runner),
-      // the pipeline should succeed
       expect(result.exitCode).toBe(0);
       expect(result.status).toBe('succeeded');
+
+      // Verify both instances ran by checking log output
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('BuildJob_linux');
+      expect(logOutput).toContain('BuildJob_windows');
+    });
+
+    it('19b. matrix with 3 configs — each has different variable values', { timeout: 60_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('matrix-3cfg.yaml', `
+name: Matrix3Config
+stages:
+  - stage: Build
+    jobs:
+      - job: TestJob
+        strategy:
+          matrix:
+            node18:
+              nodeVersion: "18"
+              label: "LTS"
+            node20:
+              nodeVersion: "20"
+              label: "Current"
+            node22:
+              nodeVersion: "22"
+              label: "Latest"
+        steps:
+          - pwsh: Write-Host "Node $env:NODEVERSION - $env:LABEL"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      // All 3 instances should appear
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('TestJob_node18');
+      expect(logOutput).toContain('TestJob_node20');
+      expect(logOutput).toContain('TestJob_node22');
+    });
+
+    it('19c. matrix partial failure — one config fails, others succeed', { timeout: 60_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const file = await writePipeline('matrix-partial.yaml', `
+name: MatrixPartialFail
+stages:
+  - stage: Build
+    jobs:
+      - job: TestJob
+        strategy:
+          matrix:
+            pass1:
+              shouldFail: "false"
+            fail1:
+              shouldFail: "true"
+            pass2:
+              shouldFail: "false"
+        steps:
+          - pwsh: |
+              if ($env:SHOULDFAIL -eq "true") { exit 1 }
+              Write-Host "Passed"
+`);
+      const result = await runPipeline(file);
+
+      // Pipeline should report failure when any matrix instance fails
+      expect(result.exitCode).not.toBe(0);
+      expect(['failed', 'succeededWithIssues']).toContain(result.status);
+    });
+
+    it('19d. matrix with maxParallel: 1 — instances run serially', { timeout: 60_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('matrix-maxparallel.yaml', `
+name: MatrixSerial
+stages:
+  - stage: Build
+    jobs:
+      - job: SerialJob
+        strategy:
+          matrix:
+            first:
+              order: "1"
+            second:
+              order: "2"
+            third:
+              order: "3"
+          maxParallel: 1
+        steps:
+          - pwsh: Write-Host "Running order $env:ORDER"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      // All 3 instances ran
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('SerialJob_first');
+      expect(logOutput).toContain('SerialJob_second');
+      expect(logOutput).toContain('SerialJob_third');
+    });
+
+    it('19e. parallel strategy (count-based) — N instances run', { timeout: 30_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('parallel-strategy.yaml', `
+name: ParallelPipeline
+stages:
+  - stage: Build
+    jobs:
+      - job: ParallelJob
+        strategy:
+          parallel: 3
+        steps:
+          - pwsh: Write-Host "Instance running"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      // 3 instances should run
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('ParallelJob_1');
+      expect(logOutput).toContain('ParallelJob_2');
+      expect(logOutput).toContain('ParallelJob_3');
+    });
+
+    it('19f. matrix with output variables — instances set outputs', { timeout: 30_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('matrix-outputs.yaml', `
+name: MatrixOutputs
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        strategy:
+          matrix:
+            linux:
+              os: linux
+            windows:
+              os: windows
+        steps:
+          - name: setvar
+            pwsh: |
+              Write-Host "##pipeline[setvariable variable=result;isOutput=true]built-$env:OS"
+      - job: Report
+        dependsOn: BuildJob
+        steps:
+          - pwsh: Write-Host "Build complete"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      // All instances and the downstream job ran
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('BuildJob_linux');
+      expect(logOutput).toContain('BuildJob_windows');
+      expect(logOutput).toContain('Report');
     });
   });
 

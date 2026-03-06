@@ -384,6 +384,8 @@ steps:
 
 ### Matrix Strategy
 
+Fan out jobs across configuration combinations. Each matrix entry produces a separate job instance (named `{job}_{config}`). Use `maxParallel` to limit concurrent instances.
+
 ```yaml
 jobs:
   - job: CrossPlatform
@@ -401,8 +403,23 @@ jobs:
       maxParallel: 2
     steps:
       - pwsh: |
-          Write-Host "Node $(nodeVersion) on $(os)"
+          Write-Host "Node $env:NODEVERSION on $env:OS"
 ```
+
+This creates 3 job instances: `CrossPlatform_linux-node18`, `CrossPlatform_linux-node20`, `CrossPlatform_windows-node20`. Each instance gets the matrix variables injected into its environment. With `maxParallel: 2`, at most 2 instances run concurrently.
+
+#### Parallel strategy (count-based)
+
+```yaml
+jobs:
+  - job: LoadTest
+    strategy:
+      parallel: 5
+    steps:
+      - pwsh: Write-Host "Instance $env:SYSTEM_JOBPOSITIONINPHASE of $env:SYSTEM_TOTALJOBSINPHASE"
+```
+
+Creates 5 identical instances named `LoadTest_1` through `LoadTest_5`, each with `System.JobPositionInPhase` and `System.TotalJobsInPhase` variables.
 
 ### Deployment Strategies
 

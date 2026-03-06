@@ -21,6 +21,7 @@ import type { OutputVariableStore } from '../variables/output-variables.js';
 import type { SecretMasker } from '../variables/secret-masker.js';
 import type { ConditionEvaluator } from './condition-evaluator.js';
 import { JobRunner, type JobRunResult, type JobRunnerDeps } from './job-runner.js';
+import { StrategyRunner } from './strategy-runner.js';
 import {
   DependencyGraph,
   normalizeDependsOn,
@@ -273,6 +274,128 @@ export class StageRunner {
   }
 
   private async runSingleJob(
+    job: RegularJobDefinition | DeploymentJobDefinition,
+    stageContext: StageRunContext,
+    pipelineContext: PipelineRunContext,
+  ): Promise<JobRunResult> {
+    // Check for strategy (matrix/parallel) on regular jobs
+    if ('job' in job && job.strategy) {
+      const { matrix, parallel, maxParallel } = job.strategy;
+      if ((matrix && Object.keys(matrix).length > 0) || (parallel !== undefined && parallel > 0)) {
+        return this.runStrategyJob(job, stageContext, pipelineContext);
+      }
+    }
+
+    return this.runJobInstance(job, stageContext, pipelineContext);
+  }
+
+  /**
+   * Expand a job's strategy (matrix or parallel) into multiple instances
+   * and execute them with maxParallel throttling.
+   */
+  private async runStrategyJob(
+    job: RegularJobDefinition,
+    stageContext: StageRunContext,
+    pipelineContext: PipelineRunContext,
+  ): Promise<JobRunResult> {
+    const jobName = job.job;
+    const prefix = chalk.cyan(`[${stageContext.name}/${jobName}]`);
+    const startTime = Date.now();
+
+    const strategyRunner = new StrategyRunner();
+    const expansion = strategyRunner.expandStrategy(jobName, job.strategy!);
+
+    this.log(
+      prefix,
+      chalk.blue(`Expanding strategy: ${expansion.instances.length} instance(s)`),
+    );
+
+    const instanceResults = await strategyRunner.runInstances(
+      expansion.instances,
+      job.strategy!.maxParallel,
+      async (instance) => {
+        // Create a synthetic job definition with instance-specific variables
+        const instanceJob: RegularJobDefinition = {
+          ...job,
+          job: instance.name,
+          // Merge instance variables into job variables
+          variables: this.mergeInstanceVariables(
+            job.variables,
+            instance.variables,
+          ),
+          // Clear strategy so the instance doesn't try to expand again
+          strategy: undefined,
+        };
+
+        return this.runJobInstance(instanceJob, stageContext, pipelineContext);
+      },
+    );
+
+    // Aggregate results
+    const aggregateStatus = this.determineStrategyStatus(instanceResults);
+    const duration = Date.now() - startTime;
+
+    const statusColor =
+      aggregateStatus === 'succeeded'
+        ? chalk.green
+        : aggregateStatus === 'failed'
+          ? chalk.red
+          : chalk.yellow;
+    this.log(
+      prefix,
+      statusColor(
+        `Strategy completed: ${instanceResults.length} instance(s), status: ${aggregateStatus}`,
+      ),
+    );
+
+    return {
+      name: jobName,
+      status: aggregateStatus,
+      duration,
+      steps: instanceResults.flatMap((r) => r.steps),
+    };
+  }
+
+  /**
+   * Merge instance variables (from matrix expansion) into existing job variables.
+   * Instance variables are added as simple key-value pairs alongside any existing
+   * variable definitions.
+   */
+  private mergeInstanceVariables(
+    existing: RegularJobDefinition['variables'],
+    instanceVars: Record<string, string>,
+  ): RegularJobDefinition['variables'] {
+    const instanceEntries = Object.entries(instanceVars);
+    if (instanceEntries.length === 0) return existing;
+
+    // Convert instance vars to VariableDefinition format (simple key-value pairs)
+    const instanceDefs = instanceEntries.map(([name, value]) => ({
+      name,
+      value,
+    }));
+
+    if (!existing || (Array.isArray(existing) && existing.length === 0)) {
+      return instanceDefs;
+    }
+
+    // Existing is an array of VariableDefinition — append instance vars
+    if (Array.isArray(existing)) {
+      return [...existing, ...instanceDefs];
+    }
+
+    // Existing is something else — wrap in array
+    return [...instanceDefs];
+  }
+
+  /**
+   * Determine overall strategy status from individual instance results.
+   */
+  private determineStrategyStatus(results: JobRunResult[]): PipelineStatus {
+    if (results.length === 0) return 'succeeded';
+    return this.determineStageStatus(results);
+  }
+
+  private async runJobInstance(
     job: RegularJobDefinition | DeploymentJobDefinition,
     stageContext: StageRunContext,
     pipelineContext: PipelineRunContext,

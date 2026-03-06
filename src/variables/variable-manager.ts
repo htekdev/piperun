@@ -234,7 +234,7 @@ export class VariableManager {
     if (!topScope) return;
 
     for (const [, resolved] of topScope.variables) {
-      if (resolved.value.includes('$[')) {
+      if (typeof resolved.value === 'string' && resolved.value.includes('$[')) {
         const newValue = resolver(resolved.value);
         if (newValue !== resolved.value) {
           resolved.value =
