@@ -6,3 +6,7 @@ export { JobRunner } from './job-runner.js';
 export type { JobRunResult } from './job-runner.js';
 export { DependencyGraph, normalizeDependsOn, DependencyGraphError } from './dependency-graph.js';
 export type { GraphNode } from './dependency-graph.js';
+export { PoolResolver } from './pool-resolver.js';
+export type { ResolvedPool, DemandsResult } from './pool-resolver.js';
+export { WorkspaceManager } from './workspace-manager.js';
+export type { WorkspaceInfo } from './workspace-manager.js';
