@@ -1,0 +1,131 @@
+# Demonstrates a build → test → deploy pipeline where each stage
+# passes critical data to the next via output variables.
+#
+# This example shows:
+#   - A realistic CI/CD pipeline with versioning, testing, and deployment
+#   - Cross-job output chaining within a single stage
+#   - Cross-stage output propagation with explicit $[stageDependencies...] mapping
+#   - Secret output variables for sensitive values (tokens, passwords)
+#   - Conditional deployment based on test results
+#
+# Run: piperun run examples/13-cross-stage-outputs.yaml --verbose
+name: Cross-Stage Output Pipeline
+
+parameters:
+  - name: deployTarget
+    type: string
+    default: staging
+
+variables:
+  - name: appName
+    value: acme-api
+  - name: registry
+    value: ghcr.io/acme
+
+stages:
+  # ── Build ───────────────────────────────────────────────────────────
+  - stage: Build
+    displayName: Build & Push
+    jobs:
+      - job: Compile
+        displayName: Compile Application
+        steps:
+          - pwsh: |
+              $commitSha = "abc1234"
+              $imageTag = "$env:REGISTRY/$env:APPNAME`:$commitSha"
+              Write-Host "##pipeline[setvariable variable=imageTag;isOutput=true]$imageTag"
+              Write-Host "##pipeline[setvariable variable=commitSha;isOutput=true]$commitSha"
+              Write-Host "Built image: $imageTag"
+            displayName: Build Container Image
+            name: build
+
+          - pwsh: |
+              Write-Host "Pushing $env:IMAGETAG to registry..."
+              Write-Host "##pipeline[setvariable variable=digest;isOutput=true]sha256:deadbeef1234"
+              Write-Host "Push complete"
+            displayName: Push to Registry
+            name: push
+
+      # Chain within same stage: Compile → Sign
+      - job: Sign
+        displayName: Sign Image
+        dependsOn: Compile
+        variables:
+          imageDigest: "$[dependencies.Compile.outputs['push.digest']]"
+          imageRef: "$[dependencies.Compile.outputs['build.imageTag']]"
+        steps:
+          - pwsh: |
+              Write-Host "Signing image $env:IMAGEREF"
+              Write-Host "Digest: $env:IMAGEDIGEST"
+              Write-Host "##pipeline[setvariable variable=signature;isOutput=true]sig-verified-ok"
+              Write-Host "Image signed successfully"
+            displayName: Sign with Cosign
+            name: signStep
+
+  # ── Test ────────────────────────────────────────────────────────────
+  - stage: Test
+    displayName: Quality Gates
+    dependsOn: Build
+    variables:
+      testImage: "$[stageDependencies.Build.Compile.outputs['build.imageTag']]"
+    jobs:
+      - job: Smoke
+        displayName: Smoke Tests
+        steps:
+          - pwsh: |
+              Write-Host "Running smoke tests against $env:TESTIMAGE"
+              Write-Host "##pipeline[setvariable variable=smokeResult;isOutput=true]pass"
+              Write-Host "Health check: 200 OK"
+            displayName: Health Check
+            name: smokeStep
+
+      - job: Security
+        displayName: Security Scan
+        steps:
+          - pwsh: |
+              Write-Host "Scanning for vulnerabilities..."
+              Write-Host "##pipeline[setvariable variable=vulnCount;isOutput=true]0"
+              Write-Host "##pipeline[setvariable variable=scanToken;isOutput=true;isSecret=true]scan-tok-xyz789"
+              Write-Host "0 critical, 0 high, 2 low"
+            displayName: Vulnerability Scan
+            name: scanStep
+
+      # Gate: Only if smoke tests pass
+      - job: LoadTest
+        displayName: Load Test
+        dependsOn: Smoke
+        condition: eq(dependencies.Smoke.result, 'Succeeded')
+        steps:
+          - pwsh: |
+              Write-Host "Running load tests..."
+              Write-Host "##pipeline[setvariable variable=p99Latency;isOutput=true]42ms"
+              Write-Host "p99 latency: 42ms (under 100ms threshold)"
+            displayName: Run Load Tests
+            name: loadStep
+
+  # ── Deploy ──────────────────────────────────────────────────────────
+  - stage: Deploy
+    displayName: Deploy to ${{ parameters.deployTarget }}
+    dependsOn:
+      - Build
+      - Test
+    variables:
+      # Pull outputs from multiple upstream stages
+      deployImage: "$[stageDependencies.Build.Compile.outputs['build.imageTag']]"
+      imageSignature: "$[stageDependencies.Build.Sign.outputs['signStep.signature']]"
+      vulnerabilities: "$[stageDependencies.Test.Security.outputs['scanStep.vulnCount']]"
+      latency: "$[stageDependencies.Test.LoadTest.outputs['loadStep.p99Latency']]"
+    jobs:
+      - job: DeployApp
+        displayName: Deploy Application
+        steps:
+          - pwsh: |
+              Write-Host "=== Deployment Summary ==="
+              Write-Host "Image:          $env:DEPLOYIMAGE"
+              Write-Host "Signature:      $env:IMAGESIGNATURE"
+              Write-Host "Vulnerabilities: $env:VULNERABILITIES"
+              Write-Host "p99 Latency:    $env:LATENCY"
+              Write-Host ""
+              Write-Host "Deploying to ${{ parameters.deployTarget }}..."
+              Write-Host "Deployment complete!"
+            displayName: Deploy to ${{ parameters.deployTarget }}

@@ -1,0 +1,138 @@
+# Demonstrates all output variable patterns:
+#   - Same-job step-to-step passing
+#   - Cross-job explicit mapping with $[dependencies...]
+#   - Cross-stage explicit mapping with $[stageDependencies...]
+#   - Auto-injected outputs (piperun convenience)
+#   - Dependency result conditions
+#   - Secret output variables
+#
+# Run: piperun run examples/12-output-variables.yaml --verbose
+name: Output Variable Patterns
+
+stages:
+  # ── Stage 1: Build ──────────────────────────────────────────────────
+  # Produces output variables consumed by later jobs and stages.
+  - stage: Build
+    displayName: Build & Version
+    jobs:
+      - job: Version
+        displayName: Determine Version
+        steps:
+          # Same-job: Set a non-output variable (available in later steps via env)
+          - pwsh: |
+              $version = "2.1.0"
+              Write-Host "##pipeline[setvariable variable=semver]$version"
+              Write-Host "Resolved version: $version"
+            displayName: Resolve Version
+
+          # Same-job: Set output variables (marked isOutput=true for cross-job use)
+          - pwsh: |
+              $tag = "$env:SEMVER-$(Get-Date -Format 'yyyyMMdd')"
+              Write-Host "##pipeline[setvariable variable=releaseTag;isOutput=true]$tag"
+              Write-Host "##pipeline[setvariable variable=isPrerelease;isOutput=true]false"
+              Write-Host "Release tag: $tag"
+            displayName: Generate Release Tag
+            name: tagStep
+
+          # Same-job: Consume a variable set by an earlier step
+          - pwsh: |
+              Write-Host "Building version $env:SEMVER"
+              Write-Host "Tag will be: $env:RELEASETAG"
+            displayName: Confirm Versions
+
+      # ── Cross-Job: Explicit mapping via $[dependencies...] ──────────
+      # This is the ADO-standard pattern. Consumer declares which outputs
+      # it needs in its variables section using runtime expressions.
+      - job: Package
+        displayName: Package Artifacts
+        dependsOn: Version
+        variables:
+          tag: "$[dependencies.Version.outputs['tagStep.releaseTag']]"
+          prerelease: "$[dependencies.Version.outputs['tagStep.isPrerelease']]"
+        steps:
+          - pwsh: |
+              Write-Host "Packaging with tag: $env:TAG"
+              Write-Host "Pre-release: $env:PRERELEASE"
+              Write-Host "##pipeline[setvariable variable=artifactName;isOutput=true]myapp-$env:TAG.tar.gz"
+            displayName: Create Package
+            name: pkgStep
+
+      # ── Cross-Job: Condition based on dependency result ─────────────
+      # Use dependencies.JobName.result in conditions to gate execution.
+      - job: Validate
+        displayName: Validate Package
+        dependsOn: Package
+        condition: eq(dependencies.Package.result, 'Succeeded')
+        steps:
+          - pwsh: |
+              Write-Host "Package validation passed"
+              Write-Host "##pipeline[setvariable variable=validated;isOutput=true]true"
+            displayName: Run Validation
+            name: valStep
+
+  # ── Stage 2: Test ───────────────────────────────────────────────────
+  # Consumes outputs from the Build stage using $[stageDependencies...].
+  - stage: Test
+    displayName: Quality Gates
+    dependsOn: Build
+    variables:
+      # Cross-stage explicit mapping — reference upstream stage outputs
+      buildTag: "$[stageDependencies.Build.Version.outputs['tagStep.releaseTag']]"
+      packageName: "$[stageDependencies.Build.Package.outputs['pkgStep.artifactName']]"
+    jobs:
+      - job: UnitTests
+        displayName: Unit Tests
+        steps:
+          - pwsh: |
+              Write-Host "Testing build: $env:BUILDTAG"
+              Write-Host "Package: $env:PACKAGENAME"
+              Write-Host "##pipeline[setvariable variable=coverage;isOutput=true]94.7"
+              Write-Host "All 342 tests passed"
+            displayName: Run Tests
+            name: testStep
+
+      - job: Integration
+        displayName: Integration Tests
+        dependsOn: UnitTests
+        steps:
+          - pwsh: |
+              Write-Host "Integration tests passed"
+              Write-Host "##pipeline[setvariable variable=e2eResult;isOutput=true]pass"
+            displayName: Run Integration
+            name: intStep
+
+  # ── Stage 3: Publish ────────────────────────────────────────────────
+  # Combines outputs from multiple upstream stages.
+  - stage: Publish
+    displayName: Publish Release
+    dependsOn:
+      - Build
+      - Test
+    variables:
+      releaseTag: "$[stageDependencies.Build.Version.outputs['tagStep.releaseTag']]"
+      testCoverage: "$[stageDependencies.Test.UnitTests.outputs['testStep.coverage']]"
+    jobs:
+      - job: PublishRelease
+        displayName: Create Release
+        steps:
+          - pwsh: |
+              Write-Host "Publishing release $env:RELEASETAG"
+              Write-Host "Test coverage: $env:TESTCOVERAGE%"
+              Write-Host "Release published successfully!"
+            displayName: Publish
+
+  # ── Stage 4: Notify ─────────────────────────────────────────────────
+  # Runs regardless of upstream success/failure via always() condition.
+  - stage: Notify
+    displayName: Send Notifications
+    dependsOn: Publish
+    condition: always()
+    jobs:
+      - job: NotifyTeam
+        steps:
+          - pwsh: |
+              Write-Host "Pipeline: $env:PIPELINE_NAME"
+              Write-Host "Run: $env:PIPELINE_RUNNUMBER"
+              Write-Host "Notification sent."
+            displayName: Notify
+            condition: always()

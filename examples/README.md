@@ -19,3 +19,5 @@ piperun run examples/<file>.yaml --verbose
 | `09-templates/pipeline.yaml` | Template includes and reuse |
 | `10-error-handling.yaml` | Retries, timeouts, continueOnError |
 | `11-full-pipeline.yaml` | Production-style multi-stage CI/CD |
+| `12-output-variables.yaml` | Cross-job/stage output variable patterns |
+| `13-cross-stage-outputs.yaml` | Realistic CI/CD with output chaining |
