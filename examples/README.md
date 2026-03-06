@@ -21,3 +21,5 @@ piperun run examples/<file>.yaml --verbose
 | `11-full-pipeline.yaml` | Production-style multi-stage CI/CD |
 | `12-output-variables.yaml` | Cross-job/stage output variable patterns |
 | `13-cross-stage-outputs.yaml` | Realistic CI/CD with output chaining |
+| `14-matrix-parallel-strategy.yaml` | Advanced matrix, maxParallel, parallel, outputs |
+| `15-matrix-ci-pipeline.yaml` | Cross-platform CI with matrix test/build stages |

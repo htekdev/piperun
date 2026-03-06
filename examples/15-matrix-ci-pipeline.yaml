@@ -1,0 +1,91 @@
+# Realistic CI/CD pipeline using matrix strategy for cross-platform testing.
+# Simulates a Node.js library tested across versions + platforms, then published.
+name: Cross-Platform CI
+
+stages:
+  # ─── Stage 1: Lint (single job, no matrix) ─────────────────────────────────
+  - stage: Lint
+    displayName: Code Quality
+    jobs:
+      - job: LintCheck
+        steps:
+          - pwsh: |
+              Write-Host "Running ESLint..."
+              Write-Host "Running Prettier check..."
+              Write-Host "All checks passed"
+            displayName: Lint & Format
+
+  # ─── Stage 2: Test across Node versions ────────────────────────────────────
+  # 3 Node versions × serial execution (maxParallel: 1 for CI resource limits)
+  - stage: Test
+    displayName: Test Matrix
+    dependsOn: Lint
+    jobs:
+      - job: UnitTest
+        strategy:
+          matrix:
+            node18:
+              nodeVersion: "18"
+              isLTS: "true"
+            node20:
+              nodeVersion: "20"
+              isLTS: "true"
+            node22:
+              nodeVersion: "22"
+              isLTS: "false"
+          maxParallel: 2
+        steps:
+          - pwsh: |
+              Write-Host "=== Node.js $env:NODEVERSION Test Run ==="
+              Write-Host "LTS: $env:ISLTS"
+              Write-Host "Installing dependencies..."
+              Write-Host "Running unit tests..."
+              Write-Host "All tests passed on Node $env:NODEVERSION"
+            displayName: Run Unit Tests
+          - name: results
+            pwsh: |
+              $passed = Get-Random -Minimum 90 -Maximum 120
+              Write-Host "Tests passed: $passed"
+              Write-Host "##pipeline[setvariable variable=testCount;isOutput=true]$passed"
+            displayName: Report Results
+
+  # ─── Stage 3: Build artifacts per platform ─────────────────────────────────
+  - stage: Build
+    displayName: Build Artifacts
+    dependsOn: Test
+    jobs:
+      - job: BuildPlatform
+        strategy:
+          matrix:
+            linux_x64:
+              targetOS: linux
+              arch: x64
+            darwin_x64:
+              targetOS: darwin
+              arch: x64
+            darwin_arm64:
+              targetOS: darwin
+              arch: arm64
+            win_x64:
+              targetOS: windows
+              arch: x64
+        steps:
+          - pwsh: |
+              Write-Host "Building for $env:TARGETOS/$env:ARCH"
+              $artifact = "mylib-$env:TARGETOS-$env:ARCH.tar.gz"
+              Write-Host "Artifact: $artifact"
+              Write-Host "##pipeline[setvariable variable=artifact;isOutput=true]$artifact"
+            name: pkg
+            displayName: Package
+
+  # ─── Stage 4: Publish (single job, runs after all builds) ──────────────────
+  - stage: Publish
+    displayName: Publish Release
+    dependsOn: Build
+    jobs:
+      - job: PublishJob
+        steps:
+          - pwsh: |
+              Write-Host "Publishing all platform artifacts..."
+              Write-Host "Release complete"
+            displayName: Publish to Registry

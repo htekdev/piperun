@@ -1,0 +1,109 @@
+# Advanced matrix and parallel strategies.
+# Demonstrates fan-out patterns: named configs, maxParallel throttling,
+# count-based parallel, and multi-variable matrices.
+name: Matrix & Parallel Patterns
+
+stages:
+  # ─── Pattern 1: Multi-variable matrix ─────────────────────────────────────
+  # Each named config produces a job instance: TestJob_debug, TestJob_release
+  # Variables are injected as env vars: $env:BUILDTYPE, $env:COVERAGE
+  - stage: MultiVar
+    displayName: Multi-Variable Matrix
+    jobs:
+      - job: TestJob
+        strategy:
+          matrix:
+            debug:
+              buildType: debug
+              coverage: "true"
+            release:
+              buildType: release
+              coverage: "false"
+        steps:
+          - pwsh: |
+              Write-Host "Build type: $env:BUILDTYPE"
+              Write-Host "Coverage enabled: $env:COVERAGE"
+              if ($env:COVERAGE -eq "true") {
+                Write-Host "Running with code coverage instrumentation"
+              } else {
+                Write-Host "Running without coverage (faster)"
+              }
+            displayName: Run Tests
+
+  # ─── Pattern 2: maxParallel throttling ─────────────────────────────────────
+  # 4 configs but only 2 run at a time — useful for limited resources
+  - stage: Throttled
+    displayName: Throttled Matrix
+    dependsOn: MultiVar
+    jobs:
+      - job: DeployRegion
+        strategy:
+          matrix:
+            us_east:
+              region: us-east-1
+              tier: primary
+            us_west:
+              region: us-west-2
+              tier: primary
+            eu_west:
+              region: eu-west-1
+              tier: secondary
+            ap_south:
+              region: ap-south-1
+              tier: secondary
+          maxParallel: 2
+        steps:
+          - pwsh: |
+              Write-Host "Deploying to region: $env:REGION"
+              Write-Host "Tier: $env:TIER"
+              if ($env:TIER -eq "primary") {
+                Write-Host "Primary region — deploying with full replicas"
+              } else {
+                Write-Host "Secondary region — deploying with reduced replicas"
+              }
+            displayName: Deploy to Region
+
+  # ─── Pattern 3: Count-based parallel strategy ─────────────────────────────
+  # Creates N identical instances for load testing or parallel work distribution
+  # Each instance gets System.JobPositionInPhase and System.TotalJobsInPhase
+  - stage: LoadTest
+    displayName: Parallel Load Test
+    dependsOn: Throttled
+    jobs:
+      - job: Worker
+        strategy:
+          parallel: 4
+        steps:
+          - pwsh: |
+              $position = $env:SYSTEM_JOBPOSITIONINPHASE
+              $total = $env:SYSTEM_TOTALJOBSINPHASE
+              Write-Host "Worker $position of $total starting"
+              Write-Host "Processing shard $position..."
+            displayName: Run Load Shard
+
+  # ─── Pattern 4: Matrix with output variables ──────────────────────────────
+  # Each matrix instance can set outputs; downstream jobs can consume them
+  - stage: Outputs
+    displayName: Matrix with Outputs
+    dependsOn: LoadTest
+    jobs:
+      - job: Builder
+        strategy:
+          matrix:
+            api:
+              component: api
+              port: "3000"
+            web:
+              component: web
+              port: "8080"
+        steps:
+          - name: build
+            pwsh: |
+              Write-Host "Building $env:COMPONENT on port $env:PORT"
+              Write-Host "##pipeline[setvariable variable=artifact;isOutput=true]$env:COMPONENT-v1.0.0"
+            displayName: Build Component
+      - job: Summary
+        dependsOn: Builder
+        steps:
+          - pwsh: Write-Host "All components built successfully"
+            displayName: Report
