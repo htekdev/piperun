@@ -117,14 +117,9 @@ export class JobRunner {
         };
       }
 
-      // Create step runner
-      const environment = {
-        ...this.deps.variableManager.toEnvironment(),
-      };
-
-      const stepRunner = this.deps.stepRunnerFactory({
+      // Build step runner factory options shared across steps
+      const stepRunnerOpts = {
         workingDirectory: this.options.workingDirectory,
-        environment,
         timeoutMs: job.timeoutInMinutes
           ? job.timeoutInMinutes * 60 * 1000
           : undefined,
@@ -148,7 +143,7 @@ export class JobRunner {
             value,
           );
         },
-      });
+      };
 
       // Execute steps sequentially
       const stepResults: StepResult[] = [];
@@ -212,6 +207,12 @@ export class JobRunner {
           this.log(prefix, chalk.white(`Step '${stepName}': Running`));
         }
 
+        // Re-snapshot environment for each step so setvariable from prior steps is visible
+        const stepRunner = this.deps.stepRunnerFactory({
+          ...stepRunnerOpts,
+          environment: { ...this.deps.variableManager.toEnvironment() },
+        });
+
         const stepResult = await stepRunner.executeStep(step, stepName);
         stepResults.push(stepResult);
 
@@ -272,7 +273,12 @@ export class JobRunner {
                 if (this.options.verbose) {
                   this.log(prefix, chalk.white(`Step '${remainingStepName}': Running (explicit condition)`));
                 }
-                const remainingResult = await stepRunner.executeStep(
+                // Re-snapshot environment for remaining steps too
+                const remainingStepRunner = this.deps.stepRunnerFactory({
+                  ...stepRunnerOpts,
+                  environment: { ...this.deps.variableManager.toEnvironment() },
+                });
+                const remainingResult = await remainingStepRunner.executeStep(
                   remainingStep,
                   remainingStepName,
                 );
@@ -292,6 +298,14 @@ export class JobRunner {
               }
             }
             break;
+          }
+        } else if (stepResult.status === 'succeededWithIssues') {
+          // Step was failed but had continueOnError — propagate to job status
+          if (this.options.verbose) {
+            this.log(prefix, chalk.yellow(`Step '${stepName}': Succeeded with issues`));
+          }
+          if (jobStatus === 'succeeded') {
+            jobStatus = 'succeededWithIssues';
           }
         } else if (stepResult.status === 'succeeded') {
           if (this.options.verbose) {
