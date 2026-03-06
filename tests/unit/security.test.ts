@@ -191,6 +191,189 @@ describe('ExtendsEnforcer', () => {
       expect(check.allowed).toBe(true);
     });
   });
+
+  describe('step type detection', () => {
+    it('detects node step type', () => {
+      const policy: ExtendsPolicy = { allowedStepTypes: ['node'] };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      expect(enforcer.isStepAllowed({ node: 'console.log()' }).allowed).toBe(true);
+    });
+
+    it('detects python step type', () => {
+      const policy: ExtendsPolicy = { allowedStepTypes: ['python'] };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      expect(enforcer.isStepAllowed({ python: 'print()' }).allowed).toBe(true);
+    });
+
+    it('returns allowed for unknown step type (no known key)', () => {
+      const policy: ExtendsPolicy = { allowedStepTypes: ['task'] };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const check = enforcer.isStepAllowed({ unknown: 'something' } as unknown);
+      expect(check.allowed).toBe(true);
+    });
+  });
+
+  describe('pipeline structure validation', () => {
+    it('validates top-level steps', () => {
+      const policy: ExtendsPolicy = { allowScripts: false };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        steps: [
+          { pwsh: 'echo forbidden' },
+        ],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(false);
+    });
+
+    it('validates top-level jobs', () => {
+      const policy: ExtendsPolicy = { allowedStepTypes: ['task'] };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            job: 'Build',
+            steps: [{ node: 'console.log("forbidden")' }],
+          },
+        ],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(false);
+    });
+
+    it('validates deployment job lifecycle hooks', () => {
+      const policy: ExtendsPolicy = { allowScripts: false };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {
+              runOnce: {
+                deploy: {
+                  steps: [{ pwsh: 'echo deploy' }],
+                },
+              },
+            },
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(false);
+    });
+
+    it('validates deployment job on.success/failure hooks', () => {
+      const policy: ExtendsPolicy = { allowScripts: false };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {
+              runOnce: {
+                deploy: {
+                  steps: [{ task: 'Deploy@1' }],
+                },
+                on: {
+                  success: {
+                    steps: [{ pwsh: 'echo success' }],
+                  },
+                },
+              },
+            },
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(false);
+    });
+
+    it('handles deployment with no lifecycle strategy', () => {
+      const policy: ExtendsPolicy = { allowScripts: false };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {},
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(true);
+    });
+
+    it('handles stages without jobs', () => {
+      const policy: ExtendsPolicy = {};
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        stages: [
+          { stage: 'EmptyStage' },
+        ],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(true);
+    });
+
+    it('validates pipeline with no steps, jobs, or stages', () => {
+      const policy: ExtendsPolicy = {};
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {};
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(true);
+    });
+
+    it('validates pipeline without parameters set (maxParameters check skipped)', () => {
+      const policy: ExtendsPolicy = { maxParameters: 2 };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      const pipeline: PipelineDefinition = {
+        steps: [{ task: 'Build@1' }],
+      };
+
+      const result = enforcer.validate(pipeline);
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('glob pattern matching', () => {
+    it('matches ** glob patterns', () => {
+      const policy: ExtendsPolicy = { allowedTasks: ['Npm**'] };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      expect(enforcer.isTaskAllowed('NpmBuild@1')).toBe(true);
+      expect(enforcer.isTaskAllowed('NpmInstall@2')).toBe(true);
+    });
+
+    it('matches ? glob patterns', () => {
+      const policy: ExtendsPolicy = { allowedTasks: ['Build@?'] };
+      const enforcer = new ExtendsEnforcer(policy);
+
+      expect(enforcer.isTaskAllowed('Build@1')).toBe(true);
+      expect(enforcer.isTaskAllowed('Build@2')).toBe(true);
+      expect(enforcer.isTaskAllowed('Build@10')).toBe(false);
+    });
+  });
 });
 
 // ─── DecoratorEngine ────────────────────────────────────────────────────────────
@@ -329,6 +512,227 @@ postJob:
       const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
       const job = result.stages![0].jobs![0] as { steps: { pwsh: string }[] };
       expect(job.steps[0].pwsh).toBe('echo pre');
+    });
+
+    it('passes through stages without jobs', () => {
+      const pipeline: PipelineDefinition = {
+        stages: [
+          {
+            stage: 'EmptyStage',
+          },
+        ],
+      };
+
+      const config = {
+        preJob: [{ pwsh: 'echo pre' }],
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      expect(result.stages![0].stage).toBe('EmptyStage');
+      expect((result.stages![0] as Record<string, unknown>).jobs).toBeUndefined();
+    });
+
+    it('passes through template job references without modification', () => {
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          { template: 'jobs/build.yaml' } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const config = {
+        preJob: [{ pwsh: 'echo pre' }],
+        postJob: [{ pwsh: 'echo post' }],
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      const job = result.jobs![0] as Record<string, unknown>;
+      expect(job.template).toBe('jobs/build.yaml');
+    });
+
+    it('decorates deployment job lifecycle hooks', () => {
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {
+              runOnce: {
+                deploy: {
+                  steps: [{ pwsh: 'deploy' }],
+                },
+              },
+            },
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const config = {
+        preJob: [{ pwsh: 'echo pre' }],
+        postJob: [{ pwsh: 'echo post' }],
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      const deploy = result.jobs![0] as Record<string, unknown>;
+      const strategy = deploy.strategy as Record<string, unknown>;
+      const runOnce = strategy.runOnce as Record<string, unknown>;
+      const deployHook = runOnce.deploy as { steps: unknown[] };
+      // preJob + deploy + postJob = 3
+      expect(deployHook.steps).toHaveLength(3);
+    });
+
+    it('decorates deployment on.success and on.failure hooks', () => {
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {
+              runOnce: {
+                deploy: {
+                  steps: [{ pwsh: 'deploy' }],
+                },
+                on: {
+                  success: { steps: [{ pwsh: 'yay' }] },
+                  failure: { steps: [{ pwsh: 'oops' }] },
+                },
+              },
+            },
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const config = {
+        preJob: [{ pwsh: 'echo pre' }],
+        postJob: [{ pwsh: 'echo post' }],
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      const deploy = result.jobs![0] as Record<string, unknown>;
+      const strategy = deploy.strategy as Record<string, unknown>;
+      const runOnce = strategy.runOnce as Record<string, unknown>;
+      const on = runOnce.on as Record<string, unknown>;
+      const success = on.success as { steps: unknown[] };
+      const failure = on.failure as { steps: unknown[] };
+      // preJob + step + postJob = 3
+      expect(success.steps).toHaveLength(3);
+      expect(failure.steps).toHaveLength(3);
+    });
+
+    it('decorates rolling strategy lifecycle', () => {
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {
+              rolling: {
+                maxParallel: 2,
+                deploy: {
+                  steps: [{ pwsh: 'rolling deploy' }],
+                },
+              },
+            },
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const config = {
+        preJob: [{ pwsh: 'echo pre' }],
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      const deploy = result.jobs![0] as Record<string, unknown>;
+      const strategy = deploy.strategy as Record<string, unknown>;
+      const rolling = strategy.rolling as Record<string, unknown>;
+      const deployHook = rolling.deploy as { steps: unknown[] };
+      expect(deployHook.steps.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('decorates canary strategy lifecycle', () => {
+      const pipeline: PipelineDefinition = {
+        jobs: [
+          {
+            deployment: 'web',
+            environment: 'prod',
+            strategy: {
+              canary: {
+                increments: [25, 50, 100],
+                deploy: {
+                  steps: [{ pwsh: 'canary deploy' }],
+                },
+              },
+            },
+          } as unknown as import('../../src/types/pipeline.js').JobDefinition,
+        ],
+      };
+
+      const config = {
+        postJob: [{ pwsh: 'echo post' }],
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      const deploy = result.jobs![0] as Record<string, unknown>;
+      const strategy = deploy.strategy as Record<string, unknown>;
+      const canary = strategy.canary as Record<string, unknown>;
+      const deployHook = canary.deploy as { steps: unknown[] };
+      expect(deployHook.steps.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('handles steps without preStep or postStep (no interleaving needed)', () => {
+      const pipeline: PipelineDefinition = {
+        steps: [
+          { pwsh: 'step1' },
+          { pwsh: 'step2' },
+        ],
+      };
+
+      const config = {
+        preJob: [{ pwsh: 'pre' }],
+        // no preStep, no postStep
+      };
+
+      const result = engine.applyDecorators(pipeline, config) as PipelineDefinition;
+      // Steps unchanged (no preStep/postStep interleaving)
+      expect(result.steps).toHaveLength(2);
+    });
+
+    it('loads preStep and postStep decorator config', async () => {
+      const pipelineDir = join(tmpDir, '.pipeline');
+      await mkdir(pipelineDir, { recursive: true });
+      await writeFile(
+        join(pipelineDir, 'decorators.yaml'),
+        `
+preStep:
+  - pwsh: echo "before each step"
+postStep:
+  - pwsh: echo "after each step"
+`,
+      );
+
+      const config = await engine.loadDecorators(tmpDir);
+      expect(config).not.toBeNull();
+      expect(config!.preStep).toHaveLength(1);
+      expect(config!.postStep).toHaveLength(1);
+    });
+
+    it('returns null for non-object YAML content', async () => {
+      const pipelineDir = join(tmpDir, '.pipeline');
+      await mkdir(pipelineDir, { recursive: true });
+      await writeFile(join(pipelineDir, 'decorators.yaml'), '"just a string"');
+
+      const config = await engine.loadDecorators(tmpDir);
+      expect(config).toBeNull();
+    });
+
+    it('returns empty config for YAML with no recognized keys', async () => {
+      const pipelineDir = join(tmpDir, '.pipeline');
+      await mkdir(pipelineDir, { recursive: true });
+      await writeFile(join(pipelineDir, 'decorators.yaml'), 'unknownKey: 123');
+
+      const config = await engine.loadDecorators(tmpDir);
+      expect(config).not.toBeNull();
+      // No preJob/postJob/preStep/postStep recognized
+      expect(config!.preJob).toBeUndefined();
     });
   });
 });

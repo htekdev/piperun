@@ -634,4 +634,203 @@ describe('ExpressionEngine — edge cases', () => {
       },
     });
   });
+
+  it('resolves stageDependencies namespace as alias for dependencies', () => {
+    const ctx = createTestContext({
+      dependencies: {
+        buildJob: { result: 'Succeeded' },
+      },
+    });
+    expect(
+      engine.evaluateCompileTime('${{ stageDependencies.buildJob.result }}', ctx),
+    ).toBe('Succeeded');
+  });
+
+  it('returns empty for unknown stageDependencies', () => {
+    const ctx = createTestContext({ dependencies: {} });
+    expect(
+      engine.evaluateCompileTime('${{ stageDependencies.missing }}', ctx),
+    ).toBe('');
+  });
+
+  it('resolves variable without namespace from parameters', () => {
+    const ctx = createTestContext({ parameters: { env: 'prod' } });
+    expect(engine.evaluateCompileTime('${{ env }}', ctx)).toBe('prod');
+  });
+
+  it('resolves variable without namespace from dependencies', () => {
+    const ctx = createTestContext({
+      dependencies: { buildJob: 'done' as unknown },
+    } as Partial<ExpressionContext>);
+    expect(engine.evaluateCompileTime('${{ buildJob }}', ctx)).toBe('done');
+  });
+
+  it('resolves variable without namespace from pipeline', () => {
+    const ctx = createTestContext({ pipeline: { workspace: '/runner' } });
+    expect(engine.evaluateCompileTime('${{ workspace }}', ctx)).toBe('/runner');
+  });
+
+  it('returns empty for variable without namespace not found anywhere', () => {
+    const ctx = createTestContext();
+    expect(engine.evaluateCompileTime('${{ missingVar }}', ctx)).toBe('');
+  });
+
+  it('handles unknown namespace with valid context key (env namespace)', () => {
+    // The 'env' namespace is a KNOWN_NAMESPACE but falls through to the default
+    // case in resolveVariable, which looks it up as a top-level context key.
+    const ctx = createTestContext();
+    const extCtx = ctx as unknown as Record<string, unknown>;
+    extCtx['env'] = { MY_VAR: 'env-value' };
+    expect(
+      engine.evaluateCompileTime('${{ env.MY_VAR }}', extCtx as unknown as ExpressionContext),
+    ).toBe('env-value');
+  });
+
+  it('returns empty for unknown namespace key not in context', () => {
+    const ctx = createTestContext();
+    // 'runner' is in KNOWN_NAMESPACES but not in context
+    expect(
+      engine.evaluateCompileTime('${{ runner.os }}', ctx),
+    ).toBe('');
+  });
+
+  it('returns empty for known namespace with non-object context value', () => {
+    const ctx = createTestContext();
+    const extCtx = ctx as unknown as Record<string, unknown>;
+    extCtx['env'] = 'not-an-object';
+    expect(
+      engine.evaluateCompileTime('${{ env.MY_VAR }}', extCtx as unknown as ExpressionContext),
+    ).toBe('');
+  });
+
+  it('returns empty for known namespace with null context value', () => {
+    const ctx = createTestContext();
+    const extCtx = ctx as unknown as Record<string, unknown>;
+    extCtx['strategy'] = null;
+    expect(
+      engine.evaluateCompileTime('${{ strategy.name }}', extCtx as unknown as ExpressionContext),
+    ).toBe('');
+  });
+
+  it('handles navigateProperty on null value', () => {
+    const ctx = createTestContext({ parameters: { val: null } });
+    expect(
+      engine.evaluateCompileTime('${{ parameters.val.prop }}', ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateProperty on non-object (string)', () => {
+    const ctx = createTestContext({ variables: { name: 'hello' } });
+    expect(
+      engine.evaluateCompileTime('${{ variables.name.length }}', ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateProperty with missing key', () => {
+    const ctx = createTestContext({
+      parameters: { config: { existing: 'yes' } },
+    });
+    expect(
+      engine.evaluateCompileTime('${{ parameters.config.missing }}', ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateIndex on null', () => {
+    const ctx = createTestContext({ parameters: { val: null } });
+    expect(
+      engine.evaluateCompileTime('${{ parameters.val[0] }}', ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateIndex on array with out-of-bounds index', () => {
+    const ctx = createTestContext({ parameters: { items: ['a'] } });
+    expect(
+      engine.evaluateCompileTime('${{ parameters.items[99] }}', ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateIndex on array with non-numeric index', () => {
+    const ctx = createTestContext({ parameters: { items: ['a', 'b'] } });
+    expect(
+      engine.evaluateCompileTime("${{ parameters.items['x'] }}", ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateIndex on object with string key', () => {
+    const ctx = createTestContext({
+      parameters: { config: { key: 'value' } },
+    });
+    expect(
+      engine.evaluateCompileTime("${{ parameters.config['key'] }}", ctx),
+    ).toBe('value');
+  });
+
+  it('handles navigateIndex on object with missing key', () => {
+    const ctx = createTestContext({
+      parameters: { config: { key: 'value' } },
+    });
+    expect(
+      engine.evaluateCompileTime("${{ parameters.config['missing'] }}", ctx),
+    ).toBe('');
+  });
+
+  it('handles navigateIndex on non-object (string)', () => {
+    const ctx = createTestContext({ variables: { name: 'hello' } });
+    expect(
+      engine.evaluateCompileTime("${{ variables.name[0] }}", ctx),
+    ).toBe('');
+  });
+
+  it('coerces number to string in interpolation context', () => {
+    const ctx = createTestContext({ parameters: { count: 42 } });
+    expect(
+      engine.evaluateCompileTime('Count: ${{ parameters.count }}', ctx),
+    ).toBe('Count: 42');
+  });
+
+  it('coerces array to JSON in interpolation context', () => {
+    const ctx = createTestContext({ parameters: { items: ['a', 'b'] } });
+    expect(
+      engine.evaluateCompileTime('Items: ${{ parameters.items }}', ctx),
+    ).toBe('Items: ["a","b"]');
+  });
+
+  it('coerces object to JSON in interpolation context', () => {
+    const ctx = createTestContext({
+      parameters: { config: { k: 'v' } },
+    });
+    expect(
+      engine.evaluateCompileTime('Config: ${{ parameters.config }}', ctx),
+    ).toBe('Config: {"k":"v"}');
+  });
+
+  it('evaluateCompileTime returns non-string input as-is', () => {
+    const ctx = createTestContext();
+    expect(engine.evaluateCompileTime(42 as unknown as string, ctx)).toBe(42);
+  });
+
+  it('evaluateRuntime returns non-string input as-is', () => {
+    const ctx = createTestContext();
+    expect(engine.evaluateRuntime(true as unknown as string, ctx)).toBe(true);
+  });
+
+  it('processObject with null passes through', () => {
+    const ctx = createTestContext();
+    expect(engine.processObject(null, ctx, 'compile')).toBe(null);
+  });
+
+  it('processObject with undefined passes through', () => {
+    const ctx = createTestContext();
+    expect(engine.processObject(undefined, ctx, 'compile')).toBe(undefined);
+  });
+
+  it('processObject with number passes through', () => {
+    const ctx = createTestContext();
+    expect(engine.processObject(42, ctx, 'compile')).toBe(42);
+  });
+
+  it('processObject with boolean passes through', () => {
+    const ctx = createTestContext();
+    expect(engine.processObject(true, ctx, 'compile')).toBe(true);
+  });
 });

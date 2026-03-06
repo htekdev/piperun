@@ -425,5 +425,149 @@ describe('DeploymentRunner', () => {
       expect(result.status).toBe('succeeded');
       expect(result.strategy).toBe('none');
     });
+
+    it('handles empty steps in a hook', async () => {
+      const runner = createRunner();
+      const ctx = createPipelineContext();
+
+      const job: DeploymentJobDefinition = {
+        deployment: 'empty-hooks',
+        environment: 'dev',
+        strategy: {
+          runOnce: {
+            deploy: {
+              steps: [],
+            },
+          },
+        },
+      };
+
+      const result = await runner.runDeployment(job, ctx);
+
+      expect(result.status).toBe('succeeded');
+      const deployHook = result.hooks.find(h => h.name === 'deploy');
+      expect(deployHook).toBeDefined();
+      expect(deployHook!.steps).toHaveLength(0);
+    });
+
+    it('handles job with variables', async () => {
+      const runner = createRunner();
+      const ctx = createPipelineContext();
+
+      const job: DeploymentJobDefinition = {
+        deployment: 'with-vars',
+        environment: 'dev',
+        variables: { CUSTOM_VAR: 'custom_value' },
+        strategy: {
+          runOnce: {
+            deploy: {
+              steps: [
+                { node: `process.stdout.write('ok');`, displayName: 'Deploy' },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await runner.runDeployment(job, ctx);
+
+      expect(result.status).toBe('succeeded');
+    });
+
+    it('handles canary with default increments (no increments specified)', async () => {
+      const runner = createRunner();
+      const ctx = createPipelineContext();
+
+      const job: DeploymentJobDefinition = {
+        deployment: 'canary-default',
+        environment: 'prod',
+        strategy: {
+          canary: {
+            deploy: {
+              steps: [
+                { node: `process.stdout.write('canary');`, displayName: 'Deploy' },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await runner.runDeployment(job, ctx);
+
+      expect(result.status).toBe('succeeded');
+      expect(result.strategy).toBe('canary');
+    });
+
+    it('handles rolling with default maxParallel (no maxParallel specified)', async () => {
+      const runner = createRunner();
+      const ctx = createPipelineContext();
+
+      const job: DeploymentJobDefinition = {
+        deployment: 'rolling-default',
+        environment: 'prod',
+        strategy: {
+          rolling: {
+            deploy: {
+              steps: [
+                { node: `process.stdout.write('rolling');`, displayName: 'Deploy' },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await runner.runDeployment(job, ctx);
+
+      expect(result.status).toBe('succeeded');
+      expect(result.strategy).toBe('rolling');
+    });
+
+    it('handles step name resolution with different step types', async () => {
+      const runner = createRunner();
+      const ctx = createPipelineContext();
+
+      const job: DeploymentJobDefinition = {
+        deployment: 'step-names',
+        environment: 'dev',
+        strategy: {
+          runOnce: {
+            deploy: {
+              steps: [
+                { pwsh: 'echo hello', displayName: 'PowerShell Step' },
+                { python: 'print("hello")' },
+                { task: 'Build@1' },
+                { node: 'console.log("hi")' },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await runner.runDeployment(job, ctx);
+      // We just want to ensure the step names are resolved without error
+      expect(result.hooks).toHaveLength(1);
+    });
+
+    it('handles verbose mode', async () => {
+      const runner = createRunner(undefined, { workingDirectory: process.cwd(), verbose: true });
+      const ctx = createPipelineContext();
+
+      const job: DeploymentJobDefinition = {
+        deployment: 'verbose-test',
+        environment: 'dev',
+        strategy: {
+          runOnce: {
+            deploy: {
+              steps: [
+                { node: `process.stdout.write('verbose');`, displayName: 'Verbose Step' },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await runner.runDeployment(job, ctx);
+      expect(result.status).toBe('succeeded');
+    });
   });
 });

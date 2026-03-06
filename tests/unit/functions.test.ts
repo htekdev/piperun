@@ -184,6 +184,20 @@ describe('comparison functions', () => {
       expect(call('eq', true, 1)).toBe(true);
       expect(call('eq', false, 0)).toBe(true);
     });
+
+    it('falls back to string comparison for non-numeric mixed types', () => {
+      expect(call('eq', 'abc', 42)).toBe(false);
+      expect(call('eq', 42, 'abc')).toBe(false);
+    });
+
+    it('handles array/object fallback to string', () => {
+      expect(call('eq', [], '')).toBe(true);
+      expect(call('eq', {}, '')).toBe(true);
+    });
+
+    it('handles equal strings of different casing', () => {
+      expect(call('eq', 'ABC', 'abc')).toBe(true);
+    });
   });
 
   describe('ne', () => {
@@ -193,6 +207,19 @@ describe('comparison functions', () => {
 
     it('returns false for equal values', () => {
       expect(call('ne', 'hello', 'HELLO')).toBe(false);
+    });
+
+    it('null vs null is false (they are equal)', () => {
+      expect(call('ne', null, null)).toBe(false);
+    });
+
+    it('null vs value is true', () => {
+      expect(call('ne', null, 'hello')).toBe(true);
+    });
+
+    it('handles numeric coercion', () => {
+      expect(call('ne', '42', 42)).toBe(false);
+      expect(call('ne', '99', 42)).toBe(true);
     });
   });
 
@@ -219,6 +246,31 @@ describe('comparison functions', () => {
       expect(call('lt', 5, 10)).toBe(true);
       expect(call('lt', 10, 5)).toBe(false);
     });
+
+    it('handles equal values', () => {
+      expect(call('lt', 5, 5)).toBe(false);
+    });
+
+    it('handles null (null < everything)', () => {
+      expect(call('lt', null, 'a')).toBe(true);
+      expect(call('lt', 'a', null)).toBe(false);
+      expect(call('lt', null, null)).toBe(false);
+    });
+
+    it('compares strings ordinally (case-insensitive)', () => {
+      expect(call('lt', 'a', 'b')).toBe(true);
+      expect(call('lt', 'b', 'a')).toBe(false);
+    });
+
+    it('handles boolean-to-number coercion', () => {
+      expect(call('lt', false, true)).toBe(true);
+      expect(call('lt', true, false)).toBe(false);
+    });
+
+    it('handles string numeric coercion', () => {
+      expect(call('lt', '5', 10)).toBe(true);
+      expect(call('lt', 10, '5')).toBe(false);
+    });
   });
 
   describe('ge', () => {
@@ -227,6 +279,17 @@ describe('comparison functions', () => {
       expect(call('ge', 5, 5)).toBe(true);
       expect(call('ge', 4, 5)).toBe(false);
     });
+
+    it('handles null', () => {
+      expect(call('ge', null, null)).toBe(true);
+      expect(call('ge', 'a', null)).toBe(true);
+      expect(call('ge', null, 'a')).toBe(false);
+    });
+
+    it('handles string comparison', () => {
+      expect(call('ge', 'b', 'a')).toBe(true);
+      expect(call('ge', 'a', 'a')).toBe(true);
+    });
   });
 
   describe('le', () => {
@@ -234,6 +297,17 @@ describe('comparison functions', () => {
       expect(call('le', 5, 10)).toBe(true);
       expect(call('le', 5, 5)).toBe(true);
       expect(call('le', 6, 5)).toBe(false);
+    });
+
+    it('handles null', () => {
+      expect(call('le', null, null)).toBe(true);
+      expect(call('le', null, 'a')).toBe(true);
+      expect(call('le', 'a', null)).toBe(false);
+    });
+
+    it('handles string comparison', () => {
+      expect(call('le', 'a', 'b')).toBe(true);
+      expect(call('le', 'a', 'a')).toBe(true);
     });
   });
 
@@ -294,6 +368,18 @@ describe('string functions', () => {
     it('handles null inputs', () => {
       expect(call('contains', null, '')).toBe(true);
     });
+
+    it('handles boolean inputs', () => {
+      expect(call('contains', true, 'ru')).toBe(true);
+    });
+
+    it('handles array inputs (coerced to empty string)', () => {
+      expect(call('contains', [1, 2], '')).toBe(true);
+    });
+
+    it('handles object inputs (coerced to empty string)', () => {
+      expect(call('contains', {} as unknown as ExpressionResult, '')).toBe(true);
+    });
   });
 
   describe('startsWith', () => {
@@ -304,6 +390,18 @@ describe('string functions', () => {
     it('returns false when string does not start with prefix', () => {
       expect(call('startswith', 'Hello World', 'World')).toBe(false);
     });
+
+    it('handles non-string input (number)', () => {
+      expect(call('startswith', 42, '4')).toBe(true);
+    });
+
+    it('handles null input', () => {
+      expect(call('startswith', null, '')).toBe(true);
+    });
+
+    it('handles boolean input', () => {
+      expect(call('startswith', true, 'Tr')).toBe(true);
+    });
   });
 
   describe('endsWith', () => {
@@ -313,6 +411,18 @@ describe('string functions', () => {
 
     it('returns false when string does not end with suffix', () => {
       expect(call('endswith', 'Hello World', 'Hello')).toBe(false);
+    });
+
+    it('handles non-string input (number)', () => {
+      expect(call('endswith', 42, '2')).toBe(true);
+    });
+
+    it('handles null input', () => {
+      expect(call('endswith', null, '')).toBe(true);
+    });
+
+    it('handles boolean input', () => {
+      expect(call('endswith', false, 'se')).toBe(true);
     });
   });
 
@@ -354,6 +464,35 @@ describe('string functions', () => {
     it('handles boolean arguments', () => {
       expect(call('format', '{0}', true)).toBe('True');
     });
+
+    it('handles no closing brace', () => {
+      expect(call('format', 'broken {0', 'value')).toBe('broken {0');
+    });
+
+    it('handles non-numeric index', () => {
+      expect(call('format', '{abc}', 'value')).toBe('{abc}');
+    });
+
+    it('handles negative index', () => {
+      expect(call('format', '{-1}', 'value')).toBe('{-1}');
+    });
+
+    it('handles non-date format specifier', () => {
+      const result = call('format', '{0:notadate}', 'not-a-date-string');
+      expect(typeof result).toBe('string');
+    });
+
+    it('handles unescaped single closing brace', () => {
+      expect(call('format', 'end}')).toBe('end}');
+    });
+
+    it('handles format with no args', () => {
+      expect(call('format', 'plain text')).toBe('plain text');
+    });
+
+    it('handles null format template', () => {
+      expect(call('format', null)).toBe('');
+    });
   });
 
   describe('join', () => {
@@ -375,6 +514,22 @@ describe('string functions', () => {
 
     it('handles null elements', () => {
       expect(call('join', ',', ['a', null, 'b'])).toBe('a,,b');
+    });
+
+    it('handles undefined elements in array', () => {
+      expect(call('join', ',', ['a', undefined as unknown as ExpressionResult, 'b'])).toBe('a,,b');
+    });
+
+    it('handles null collection', () => {
+      expect(call('join', ',', null)).toBe('');
+    });
+
+    it('handles boolean elements in array', () => {
+      expect(call('join', ',', [true, false])).toBe('True,False');
+    });
+
+    it('handles number elements in array', () => {
+      expect(call('join', '-', [1, 2, 3])).toBe('1-2-3');
     });
   });
 
@@ -418,11 +573,31 @@ describe('string functions', () => {
     it('handles non-string input', () => {
       expect(call('upper', 42)).toBe('42');
     });
+
+    it('handles null input', () => {
+      expect(call('upper', null)).toBe('');
+    });
+
+    it('handles boolean input', () => {
+      expect(call('upper', true)).toBe('TRUE');
+    });
   });
 
   describe('lower', () => {
     it('converts to lowercase', () => {
       expect(call('lower', 'HELLO')).toBe('hello');
+    });
+
+    it('handles non-string input', () => {
+      expect(call('lower', 42)).toBe('42');
+    });
+
+    it('handles null input', () => {
+      expect(call('lower', null)).toBe('');
+    });
+
+    it('handles boolean input', () => {
+      expect(call('lower', true)).toBe('true');
     });
   });
 
@@ -433,6 +608,14 @@ describe('string functions', () => {
 
     it('trims tabs and newlines', () => {
       expect(call('trim', '\t\nhello\r\n')).toBe('hello');
+    });
+
+    it('handles non-string input', () => {
+      expect(call('trim', 42)).toBe('42');
+    });
+
+    it('handles null input', () => {
+      expect(call('trim', null)).toBe('');
     });
   });
 });
@@ -566,6 +749,65 @@ describe('collection functions', () => {
 
     it('returns false (boolean false is not null/empty)', () => {
       expect(call('coalesce', null, false, 'hello')).toBe(false);
+    });
+
+    it('returns empty string with no args', () => {
+      expect(call('coalesce')).toBe('');
+    });
+
+    it('skips undefined values', () => {
+      expect(call('coalesce', undefined as unknown as ExpressionResult, 'found')).toBe('found');
+    });
+  });
+
+  describe('counter — edge cases', () => {
+    it('handles non-numeric string seed (falls back to 0)', () => {
+      expect(call('counter', 'nanseed', 'notanumber')).toBe(0);
+    });
+
+    it('handles null prefix', () => {
+      expect(call('counter', null, 5)).toBe(5);
+    });
+
+    it('handles boolean input coerced to string', () => {
+      expect(call('counter', true, 1)).toBe(1);
+    });
+  });
+
+  describe('containsValue — additional edge cases', () => {
+    it('handles numeric values in array', () => {
+      expect(call('containsvalue', [1, 2, 3], 2)).toBe(true);
+    });
+
+    it('handles numeric coercion in array (string vs number)', () => {
+      expect(call('containsvalue', ['42', 'hello'], 42)).toBe(true);
+    });
+
+    it('handles null values in array', () => {
+      expect(call('containsvalue', [null, 'a'], null)).toBe(true);
+    });
+
+    it('finds value in object with numeric coercion', () => {
+      expect(call('containsvalue', { a: 42 } as unknown as ExpressionResult, '42')).toBe(true);
+    });
+
+    it('returns false when value not found in object', () => {
+      expect(call('containsvalue', { a: 'hello' } as unknown as ExpressionResult, 'notfound')).toBe(false);
+    });
+
+    it('handles undefined collection', () => {
+      expect(call('containsvalue')).toBe(false);
+    });
+  });
+
+  describe('length — additional edge cases', () => {
+    it('returns string length for booleans', () => {
+      expect(call('length', true)).toBe(4);  // "true".length
+      expect(call('length', false)).toBe(5); // "false".length
+    });
+
+    it('handles undefined input', () => {
+      expect(call('length')).toBe(0);
     });
   });
 });

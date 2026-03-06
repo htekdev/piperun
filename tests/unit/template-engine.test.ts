@@ -505,6 +505,204 @@ describe('TemplateExpressionProcessor', () => {
 
       expect(result).toEqual({ displayName: 'My Step' });
     });
+
+    it('handles elseif in object context when if is false and elseif is true', () => {
+      const context = createTestContext({ env: 'staging' });
+      const obj = {
+        "${{ if eq(parameters.env, 'production') }}": { pool: 'prod-pool' },
+        "${{ elseif eq(parameters.env, 'staging') }}": { pool: 'staging-pool' },
+        '${{ else }}': { pool: 'dev-pool' },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ pool: 'staging-pool' });
+    });
+
+    it('handles elseif in object context when if already matched (skips elseif)', () => {
+      const context = createTestContext({ env: 'production' });
+      const obj = {
+        "${{ if eq(parameters.env, 'production') }}": { pool: 'prod-pool' },
+        "${{ elseif eq(parameters.env, 'staging') }}": { pool: 'staging-pool' },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ pool: 'prod-pool' });
+    });
+
+    it('throws on elseif without preceding if in object context', () => {
+      const context = createTestContext({});
+      const obj = {
+        "${{ elseif eq(true, true) }}": { key: 'value' },
+      };
+
+      expect(() => processor.processObject(obj, context)).toThrow(
+        TemplateExpressionError,
+      );
+    });
+
+    it('throws on else without preceding if in object context', () => {
+      const context = createTestContext({});
+      const obj = {
+        '${{ else }}': { key: 'value' },
+      };
+
+      expect(() => processor.processObject(obj, context)).toThrow(
+        TemplateExpressionError,
+      );
+    });
+
+    it('handles else in object context when if is false', () => {
+      const context = createTestContext({ flag: false });
+      const obj = {
+        '${{ if eq(parameters.flag, true) }}': { fromIf: true },
+        '${{ else }}': { fromElse: true },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ fromElse: true });
+    });
+
+    it('handles else in object context when if is true (skips else)', () => {
+      const context = createTestContext({ flag: true });
+      const obj = {
+        '${{ if eq(parameters.flag, true) }}': { fromIf: true },
+        '${{ else }}': { fromElse: true },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ fromIf: true });
+    });
+
+    it('handles each directive in object context with array', () => {
+      const context = createTestContext({
+        envs: ['dev', 'staging'],
+      });
+      const obj = {
+        '${{ each env in parameters.envs }}': {
+          '${{ env }}': true,
+        },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ dev: true, staging: true });
+    });
+
+    it('handles each directive in object context with object', () => {
+      const context = createTestContext({
+        vars: { NODE_ENV: 'test', DEBUG: '1' },
+      });
+      const obj = {
+        '${{ each pair in parameters.vars }}': {
+          '${{ pair.key }}': '${{ pair.value }}',
+        },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ NODE_ENV: 'test', DEBUG: '1' });
+    });
+
+    it('handles each directive with non-iterable (skips silently)', () => {
+      const context = createTestContext({ val: 42 });
+      const obj = {
+        '${{ each item in parameters.val }}': { key: 'value' },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toBeNull();
+    });
+
+    it('handles mix of directives and regular keys', () => {
+      const context = createTestContext({ flag: true });
+      const obj = {
+        staticKey: 'staticValue',
+        '${{ if eq(parameters.flag, true) }}': { dynamicKey: 'dynamicValue' },
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toEqual({ staticKey: 'staticValue', dynamicKey: 'dynamicValue' });
+    });
+
+    it('processValue handles null and undefined', () => {
+      const context = createTestContext({});
+
+      expect(processor.processValue(null, context)).toBeNull();
+      expect(processor.processValue(undefined, context)).toBeUndefined();
+    });
+
+    it('processValue handles number (passes through)', () => {
+      const context = createTestContext({});
+
+      expect(processor.processValue(42, context)).toBe(42);
+    });
+
+    it('processValue handles boolean (passes through)', () => {
+      const context = createTestContext({});
+
+      expect(processor.processValue(true, context)).toBe(true);
+    });
+
+    it('processValue processes array items', () => {
+      const context = createTestContext({ name: 'World' });
+      const result = processor.processValue(
+        ['${{ parameters.name }}', 'static', 42],
+        context,
+      );
+
+      expect(result).toEqual(['World', 'static', 42]);
+    });
+
+    it('handles directive value that is not an array (single value in body)', () => {
+      const context = createTestContext({ flag: true });
+      const items = [
+        { '${{ if eq(parameters.flag, true) }}': { pwsh: 'echo ok' } },
+      ];
+
+      const result = processor.processArray(items, context);
+
+      expect(result).toHaveLength(1);
+    });
+
+    it('handles directive value that is null (empty body)', () => {
+      const context = createTestContext({ flag: true });
+      const items = [
+        { '${{ if eq(parameters.flag, true) }}': null },
+      ];
+
+      const result = processor.processArray(items, context);
+
+      expect(result).toHaveLength(0);
+    });
+
+    it('handles mergeDirectiveValueIntoObject with array value (not merged)', () => {
+      const context = createTestContext({ flag: true });
+      const obj = {
+        '${{ if eq(parameters.flag, true) }}': ['not', 'an', 'object'],
+      };
+
+      const result = processor.processObject(obj, context);
+
+      // Array is not merged into object, so result is empty (only directives)
+      expect(result).toBeNull();
+    });
+
+    it('handles mergeDirectiveValueIntoObject with null value', () => {
+      const context = createTestContext({ flag: true });
+      const obj = {
+        '${{ if eq(parameters.flag, true) }}': null,
+      };
+
+      const result = processor.processObject(obj, context);
+
+      expect(result).toBeNull();
+    });
   });
 });
 

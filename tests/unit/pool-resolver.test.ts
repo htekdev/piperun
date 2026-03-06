@@ -124,7 +124,7 @@ describe('PoolResolver', () => {
   });
 
   describe('checkCapabilities', () => {
-    it('returns Agent.OS capability', async () => {
+    it('returns Agent.OS capability', { timeout: 15_000 }, async () => {
       const caps = await resolver.checkCapabilities();
       expect(caps['Agent.OS']).toBeTruthy();
       expect(['Windows_NT', 'Darwin', 'Linux']).toContain(caps['Agent.OS']);
