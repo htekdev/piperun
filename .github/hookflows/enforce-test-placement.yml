@@ -1,0 +1,31 @@
+name: Enforce Test File Placement
+description: >
+  Test files (.test.ts, .spec.ts) must be created under the tests/ directory,
+  organized by test type: tests/unit/, tests/integration/, or tests/e2e/.
+  Test files in src/ or the project root are not allowed.
+on:
+  file:
+    lifecycle: pre
+    paths:
+      - '**/*.test.ts'
+      - '**/*.spec.ts'
+    types: [create]
+blocking: true
+steps:
+  - name: Verify test file location
+    run: |
+      FILEPATH="${{ event.file.path }}"
+
+      # Check that the file is under tests/ directory
+      if ! echo "$FILEPATH" | grep -qE '(^|/)tests/'; then
+        echo "❌ Test files must be under the tests/ directory"
+        echo "   File: $FILEPATH"
+        echo ""
+        echo "   Place test files in the appropriate subdirectory:"
+        echo "     tests/unit/        — isolated unit tests"
+        echo "     tests/integration/ — CLI integration tests"
+        echo "     tests/e2e/         — full pipeline execution tests"
+        exit 1
+      fi
+
+      echo "✅ Test file is in correct location"

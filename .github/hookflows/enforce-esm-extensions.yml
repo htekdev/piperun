@@ -1,0 +1,32 @@
+name: Enforce ESM Import Extensions
+description: >
+  All relative imports in TypeScript source and test files must use .js
+  extensions, as required by Node.js ESM resolution.
+on:
+  file:
+    lifecycle: post
+    paths:
+      - 'src/**/*.ts'
+      - 'tests/**/*.ts'
+    paths-ignore:
+      - 'src/**/*.d.ts'
+    types: [edit]
+blocking: true
+steps:
+  - name: Check relative imports have .js extension
+    run: |
+      FILE="${{ event.file.path }}"
+
+      # Find relative imports (from './' or from '../') that don't end with .js
+      BAD_IMPORTS=$(grep -nE "from\s+['\"]\.\.?/" "$FILE" | grep -vE "\.js['\"]" || true)
+
+      if [ -n "$BAD_IMPORTS" ]; then
+        echo "❌ Relative imports must use .js extension for ESM compatibility:"
+        echo "$BAD_IMPORTS"
+        echo ""
+        echo "Fix: Add .js extension to each import path"
+        echo "  Example: from './foo' → from './foo.js'"
+        exit 1
+      fi
+
+      echo "✅ All relative imports use .js extensions"

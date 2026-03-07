@@ -1,0 +1,34 @@
+name: Enforce Types Directory Purity
+description: >
+  The src/types/ directory must contain only type definitions — export type,
+  export interface, and export enum. No runtime code (classes, functions,
+  const assignments) is allowed.
+on:
+  file:
+    lifecycle: post
+    paths:
+      - 'src/types/**/*.ts'
+    types: [edit]
+blocking: true
+steps:
+  - name: Check for runtime code in types directory
+    run: |
+      FILE="${{ event.file.path }}"
+
+      # Check for runtime exports: class, function, const, let, var, default
+      # These produce JavaScript output and don't belong in the types directory
+      BAD_EXPORTS=$(grep -nE "^export\s+(class|function|const|let|var|default)\s+" "$FILE" || true)
+
+      # Also check for non-exported runtime declarations
+      BAD_DECLS=$(grep -nE "^(class|function|const|let|var)\s+" "$FILE" | grep -vE "^[0-9]+:\s*(const|let)\s+\w+\s*:\s*" || true)
+
+      if [ -n "$BAD_EXPORTS" ]; then
+        echo "❌ src/types/ must contain only type definitions:"
+        echo "$BAD_EXPORTS"
+        echo ""
+        echo "Use 'export type', 'export interface', or 'export enum' only."
+        echo "Move runtime code to the appropriate module directory."
+        exit 1
+      fi
+
+      echo "✅ Types directory purity verified"

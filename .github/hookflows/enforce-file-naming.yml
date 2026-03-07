@@ -1,0 +1,50 @@
+name: Enforce Kebab-Case File Naming
+description: >
+  All new TypeScript source and test files must use kebab-case naming
+  (lowercase letters, numbers, and hyphens). No camelCase, PascalCase,
+  or underscores.
+on:
+  file:
+    lifecycle: pre
+    paths:
+      - 'src/**/*.ts'
+      - 'tests/**/*.ts'
+    types: [create]
+blocking: true
+steps:
+  - name: Verify kebab-case filename
+    run: |
+      FILEPATH="${{ event.file.path }}"
+      FILENAME=$(basename "$FILEPATH")
+
+      # Strip known extensions: .test.ts, .spec.ts, .e2e.ts, .d.ts, .ts
+      BASE=$(echo "$FILENAME" | sed 's/\.test\.ts$//' | sed 's/\.spec\.ts$//' | sed 's/\.e2e\.ts$//' | sed 's/\.d\.ts$//' | sed 's/\.ts$//')
+
+      # Allow index files
+      if [ "$BASE" = "index" ]; then
+        echo "✅ Index file is allowed"
+        exit 0
+      fi
+
+      # Check for uppercase letters (not kebab-case)
+      if echo "$BASE" | grep -qE '[A-Z]'; then
+        echo "❌ File name must be kebab-case: $FILENAME"
+        echo "   Use lowercase-with-hyphens format (e.g., pipeline-runner.ts)"
+        exit 1
+      fi
+
+      # Check for underscores (should use hyphens)
+      if echo "$BASE" | grep -qE '_'; then
+        echo "❌ File name must use hyphens, not underscores: $FILENAME"
+        echo "   Use kebab-case format (e.g., pipeline-runner.ts, not pipeline_runner.ts)"
+        exit 1
+      fi
+
+      # Check for spaces or special characters
+      if echo "$BASE" | grep -qE '[^a-z0-9-]'; then
+        echo "❌ File name contains invalid characters: $FILENAME"
+        echo "   Only lowercase letters, numbers, and hyphens are allowed"
+        exit 1
+      fi
+
+      echo "✅ File name '$FILENAME' follows kebab-case convention"

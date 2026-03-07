@@ -1,0 +1,58 @@
+name: Block Placeholder Code
+description: >
+  Prevents introducing TODO, FIXME, stub implementations, and skipped tests.
+  All code must be fully implemented before being written.
+on:
+  file:
+    lifecycle: pre
+    paths:
+      - 'src/**/*.ts'
+      - 'tests/**/*.ts'
+    types: [edit]
+blocking: true
+steps:
+  - name: Block TODO comments
+    if: contains(event.tool.args.new_str, 'TODO')
+    run: |
+      echo "❌ TODO comment detected — implement fully, don't leave placeholders"
+      exit 1
+  - name: Block FIXME comments
+    if: contains(event.tool.args.new_str, 'FIXME')
+    run: |
+      echo "❌ FIXME comment detected — fix the issue now, don't defer"
+      exit 1
+  - name: Block HACK comments
+    if: contains(event.tool.args.new_str, 'HACK')
+    run: |
+      echo "❌ HACK comment detected — implement a proper solution"
+      exit 1
+  - name: Block stub throws
+    if: contains(event.tool.args.new_str, 'not implemented')
+    run: |
+      echo "❌ Stub implementation detected — all code must be fully implemented"
+      exit 1
+  - name: Block NotImplementedError
+    if: contains(event.tool.args.new_str, 'NotImplementedError')
+    run: |
+      echo "❌ NotImplementedError detected — all code must be fully implemented"
+      exit 1
+  - name: Block test.todo
+    if: contains(event.tool.args.new_str, 'test.todo')
+    run: |
+      echo "❌ test.todo() detected — all tests must be fully implemented"
+      exit 1
+  - name: Block it.todo
+    if: contains(event.tool.args.new_str, 'it.todo')
+    run: |
+      echo "❌ it.todo() detected — all tests must be fully implemented"
+      exit 1
+  - name: Block it.skip
+    if: contains(event.tool.args.new_str, 'it.skip')
+    run: |
+      echo "❌ it.skip() detected — all test cases must be enabled"
+      exit 1
+  - name: Block describe.skip
+    if: contains(event.tool.args.new_str, 'describe.skip')
+    run: |
+      echo "❌ describe.skip() detected — all test suites must be enabled"
+      exit 1

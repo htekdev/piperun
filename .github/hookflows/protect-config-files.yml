@@ -1,0 +1,28 @@
+name: Protect Configuration Files
+description: >
+  Blocks direct edits to project configuration files that define the build,
+  test, and type system. These files are foundational and changes require
+  explicit user direction.
+on:
+  file:
+    lifecycle: pre
+    paths:
+      - 'tsconfig.json'
+      - 'tsup.config.ts'
+      - 'vitest.config.ts'
+      - 'vitest.config.unit.ts'
+      - 'vitest.config.integration.ts'
+      - 'vitest.config.e2e.ts'
+      - 'package.json'
+      - 'package-lock.json'
+    types: [edit]
+blocking: true
+steps:
+  - name: Block config file edit
+    run: |
+      echo "❌ Configuration file is protected: ${{ event.file.path }}"
+      echo ""
+      echo "   This file defines the project's build, test, or type system configuration."
+      echo "   Changes to configuration files require explicit user approval."
+      echo "   Ask the user before modifying this file."
+      exit 1

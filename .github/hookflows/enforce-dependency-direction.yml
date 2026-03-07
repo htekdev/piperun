@@ -1,0 +1,72 @@
+name: Enforce Dependency Direction
+description: >
+  Enforces one-way dependency flow between source modules to preserve the
+  layered architecture: types → parser/functions/variables/logging →
+  compiler/security → runtime → cli. Upstream modules cannot import from
+  downstream modules.
+on:
+  file:
+    lifecycle: post
+    paths:
+      - 'src/**/*.ts'
+    paths-ignore:
+      - 'src/**/*.d.ts'
+      - 'src/index.ts'
+      - 'src/lib.ts'
+    types: [edit]
+blocking: true
+steps:
+  - name: Check module boundary compliance
+    run: |
+      FILE="${{ event.file.path }}"
+
+      # Determine which module this file belongs to
+      MODULE=$(echo "$FILE" | sed -n 's|.*/src/\([^/]*\)/.*|\1|p')
+
+      if [ -z "$MODULE" ]; then
+        echo "✅ File not in a module subdirectory, skipping"
+        exit 0
+      fi
+
+      # Define forbidden import patterns per module
+      # Architecture: types → parser/functions/variables/logging → compiler/security → runtime → cli
+      FORBIDDEN=""
+      case "$MODULE" in
+        types)
+          FORBIDDEN="(cli|compiler|runtime|parser|functions|variables|logging|security|approvals|artifacts|environments|resources|tasks)"
+          ;;
+        parser|functions|variables|logging)
+          FORBIDDEN="(cli|compiler|runtime|security)"
+          ;;
+        compiler|security)
+          FORBIDDEN="(cli|runtime)"
+          ;;
+        approvals|artifacts|environments|resources|tasks)
+          FORBIDDEN="(cli|runtime)"
+          ;;
+        runtime)
+          FORBIDDEN="(cli)"
+          ;;
+        cli)
+          echo "✅ CLI module can import from any module"
+          exit 0
+          ;;
+        *)
+          echo "✅ Module '$MODULE' not in enforcement list, skipping"
+          exit 0
+          ;;
+      esac
+
+      # Find relative imports that reference forbidden modules
+      BAD=$(grep -nE "from\s+['\"]" "$FILE" | grep -E "/${FORBIDDEN}/" || true)
+
+      if [ -n "$BAD" ]; then
+        echo "❌ Module '$MODULE' has forbidden imports:"
+        echo "$BAD"
+        echo ""
+        echo "Dependency direction: types → parser/functions/variables/logging → compiler/security → runtime → cli"
+        echo "Upstream modules cannot import from downstream modules."
+        exit 1
+      fi
+
+      echo "✅ Module boundary compliance verified for '$MODULE'"

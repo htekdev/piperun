@@ -1,0 +1,25 @@
+name: Enforce TypeScript Type Check on Commit
+description: >
+  Runs tsc --noEmit before allowing commits that include TypeScript source
+  changes, ensuring type safety is maintained across the codebase.
+on:
+  commit:
+    lifecycle: pre
+    paths:
+      - 'src/**/*.ts'
+    paths-ignore:
+      - 'src/**/*.d.ts'
+blocking: true
+steps:
+  - name: Run TypeScript type check
+    run: |
+      echo "🔍 Running TypeScript type check..."
+      npx tsc --noEmit 2>&1
+      RESULT=$?
+      if [ $RESULT -ne 0 ]; then
+        echo ""
+        echo "❌ TypeScript type check failed — fix type errors before committing"
+        exit 1
+      fi
+      echo "✅ TypeScript type check passed"
+    timeout: 120
