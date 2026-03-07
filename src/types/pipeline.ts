@@ -147,7 +147,7 @@ export interface StepTarget {
 
 // Strategies
 export interface JobStrategy {
-  matrix?: Record<string, Record<string, string>>;
+  matrix?: Record<string, Record<string, string>> | string;
   parallel?: number;
   maxParallel?: number;
 }

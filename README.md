@@ -421,6 +421,30 @@ jobs:
 
 Creates 5 identical instances named `LoadTest_1` through `LoadTest_5`, each with `System.JobPositionInPhase` and `System.TotalJobsInPhase` variables.
 
+#### Dynamic matrix (from job output)
+
+Generate matrix configurations at runtime from a previous job's output — matching Azure DevOps' `$[ dependencies... ]` pattern:
+
+```yaml
+jobs:
+  - job: Discover
+    steps:
+      - name: scan
+        pwsh: |
+          $matrix = '{"svc1":{"name":"auth"},"svc2":{"name":"api"}}'
+          Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]$matrix"
+
+  - job: Build
+    dependsOn: Discover
+    strategy:
+      matrix: "$[dependencies.Discover.outputs['scan.matrix']]"
+      maxParallel: 2
+    steps:
+      - pwsh: Write-Host "Building $env:NAME"
+```
+
+The matrix expression is resolved at runtime after the upstream job completes. The JSON output is parsed into matrix configurations and each becomes a job instance. Cross-stage dynamic matrices work via `$[stageDependencies.Stage.Job.outputs['step.var']]`.
+
 ### Deployment Strategies
 
 ```yaml

@@ -791,6 +791,138 @@ stages:
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Group 7b: Dynamic Matrix (from job output)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Dynamic Matrix', () => {
+    it('19g. dynamic matrix from job output — fan-out with runtime expression', { timeout: 60_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix.yaml', `
+name: DynamicMatrix
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: genMatrix
+            pwsh: |
+              $matrix = '{"api":{"component":"api","port":"3000"},"web":{"component":"web","port":"8080"}}'
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]$matrix"
+      - job: Build
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['genMatrix.matrix']]"
+        steps:
+          - pwsh: Write-Host "Building $env:COMPONENT on port $env:PORT"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      // Both dynamic matrix instances should run
+      expect(logOutput).toContain('Build_api');
+      expect(logOutput).toContain('Build_web');
+    });
+
+    it('19h. dynamic matrix with maxParallel', { timeout: 60_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-throttled.yaml', `
+name: DynamicMatrixThrottled
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: gen
+            pwsh: |
+              $matrix = '{"r1":{"region":"us-east"},"r2":{"region":"us-west"},"r3":{"region":"eu-west"}}'
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]$matrix"
+      - job: Deploy
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['gen.matrix']]"
+          maxParallel: 1
+        steps:
+          - pwsh: Write-Host "Deploying to $env:REGION"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('Deploy_r1');
+      expect(logOutput).toContain('Deploy_r2');
+      expect(logOutput).toContain('Deploy_r3');
+    });
+
+    it('19i. dynamic matrix with invalid JSON throws clear error', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-invalid.yaml', `
+name: DynamicMatrixInvalid
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: gen
+            pwsh: |
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]not-valid-json"
+      - job: Build
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['gen.matrix']]"
+        steps:
+          - pwsh: Write-Host "Should not run"
+`);
+      const result = await runPipeline(file);
+
+      // Pipeline should fail due to invalid JSON in dynamic matrix
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it('19j. dynamic matrix from cross-stage output', { timeout: 60_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-cross-stage.yaml', `
+name: DynamicMatrixCrossStage
+stages:
+  - stage: Discover
+    jobs:
+      - job: Scan
+        steps:
+          - name: detect
+            pwsh: |
+              $matrix = '{"svc1":{"service":"auth"},"svc2":{"service":"api"}}'
+              Write-Host "##pipeline[setvariable variable=services;isOutput=true]$matrix"
+
+  - stage: Deploy
+    dependsOn: Discover
+    jobs:
+      - job: DeploySvc
+        strategy:
+          matrix: "$[stageDependencies.Discover.Scan.outputs['detect.services']]"
+        steps:
+          - pwsh: Write-Host "Deploying service $env:SERVICE"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('DeploySvc_svc1');
+      expect(logOutput).toContain('DeploySvc_svc2');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // Group 8: Cancellation
   // ═══════════════════════════════════════════════════════════════════════════
 

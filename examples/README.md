@@ -23,3 +23,4 @@ piperun run examples/<file>.yaml --verbose
 | `13-cross-stage-outputs.yaml` | Realistic CI/CD with output chaining |
 | `14-matrix-parallel-strategy.yaml` | Advanced matrix, maxParallel, parallel, outputs |
 | `15-matrix-ci-pipeline.yaml` | Cross-platform CI with matrix test/build stages |
+| `16-dynamic-matrix.yaml` | Dynamic matrix from job output (runtime generation) |

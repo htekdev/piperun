@@ -26,7 +26,7 @@ export class StrategyRunner {
    * with the original name and no extra variables.
    */
   expandStrategy(jobName: string, strategy: JobStrategy): StrategyExpansion {
-    if (strategy.matrix && Object.keys(strategy.matrix).length > 0) {
+    if (strategy.matrix && typeof strategy.matrix !== 'string' && Object.keys(strategy.matrix).length > 0) {
       return { instances: this.expandMatrix(jobName, strategy.matrix) };
     }
 

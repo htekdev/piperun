@@ -9,6 +9,7 @@ import type {
   JobDefinition,
   RegularJobDefinition,
   DeploymentJobDefinition,
+  JobStrategy,
   PipelineRunContext,
   StageRunContext,
   JobRunContext,
@@ -280,8 +281,11 @@ export class StageRunner {
   ): Promise<JobRunResult> {
     // Check for strategy (matrix/parallel) on regular jobs
     if ('job' in job && job.strategy) {
-      const { matrix, parallel, maxParallel } = job.strategy;
-      if ((matrix && Object.keys(matrix).length > 0) || (parallel !== undefined && parallel > 0)) {
+      const { matrix, parallel } = job.strategy;
+      const hasMatrix = typeof matrix === 'string'
+        ? matrix.length > 0
+        : matrix && Object.keys(matrix).length > 0;
+      if (hasMatrix || (parallel !== undefined && parallel > 0)) {
         return this.runStrategyJob(job, stageContext, pipelineContext);
       }
     }
@@ -302,8 +306,11 @@ export class StageRunner {
     const prefix = chalk.cyan(`[${stageContext.name}/${jobName}]`);
     const startTime = Date.now();
 
+    // Resolve dynamic matrix from runtime expression (e.g., $[dependencies.Job.outputs['step.matrix']])
+    const resolvedStrategy = this.resolveDynamicMatrix(job, pipelineContext, prefix);
+
     const strategyRunner = new StrategyRunner();
-    const expansion = strategyRunner.expandStrategy(jobName, job.strategy!);
+    const expansion = strategyRunner.expandStrategy(jobName, resolvedStrategy);
 
     this.log(
       prefix,
@@ -312,7 +319,7 @@ export class StageRunner {
 
     const instanceResults = await strategyRunner.runInstances(
       expansion.instances,
-      job.strategy!.maxParallel,
+      resolvedStrategy.maxParallel,
       async (instance) => {
         // Create a synthetic job definition with instance-specific variables
         const instanceJob: RegularJobDefinition = {
@@ -393,6 +400,92 @@ export class StageRunner {
   private determineStrategyStatus(results: JobRunResult[]): PipelineStatus {
     if (results.length === 0) return 'succeeded';
     return this.determineStageStatus(results);
+  }
+
+  /**
+   * Resolve dynamic matrix from runtime expressions.
+   * ADO supports `matrix: $[ dependencies.Job.outputs['step.matrix'] ]`
+   * where the previous job outputs a JSON string that becomes the matrix.
+   */
+  private resolveDynamicMatrix(
+    job: RegularJobDefinition,
+    pipelineContext: PipelineRunContext,
+    prefix: string,
+  ): JobStrategy {
+    const strategy = { ...job.strategy! };
+
+    if (typeof strategy.matrix !== 'string') {
+      return strategy;
+    }
+
+    const matrixExpr = strategy.matrix;
+    this.log(prefix, chalk.blue(`Resolving dynamic matrix: ${matrixExpr}`));
+
+    // Build expression context with BOTH job-level and stage-level dependencies
+    // Job-level: $[dependencies.Job.outputs['step.var']] (same stage)
+    // Stage-level: $[stageDependencies.Stage.Job.outputs['step.var']] (cross-stage)
+    const variables = this.deps.variableManager.toRecord();
+    const jobDependencies = this.deps.outputStore.buildDependencyContext();
+    const stageDeps = this.deps.outputStore.buildStageDependencyContext();
+
+    // Detect which context to use based on the expression content
+    const useStageDeps = matrixExpr.includes('stageDependencies');
+    const exprContext: ExpressionContext = {
+      variables,
+      parameters: {},
+      dependencies: useStageDeps
+        ? (stageDeps as unknown as Record<string, { result: string; outputs: Record<string, string> }>)
+        : jobDependencies,
+      pipeline: {
+        'Pipeline.RunId': pipelineContext.runId,
+        'Pipeline.RunNumber': String(pipelineContext.runNumber),
+        'Pipeline.Name': pipelineContext.pipelineName,
+      },
+    };
+
+    // Resolve runtime expression
+    const resolved = this.deps.expressionEngine.evaluateRuntime(
+      matrixExpr,
+      exprContext,
+    );
+    const resolvedStr = typeof resolved === 'string' ? resolved : String(resolved);
+
+    // Parse the JSON result into a matrix record
+    let parsedMatrix: Record<string, Record<string, string>>;
+    try {
+      parsedMatrix = JSON.parse(resolvedStr);
+    } catch {
+      throw new Error(
+        `Dynamic matrix expression resolved to invalid JSON: ${resolvedStr}`,
+      );
+    }
+
+    // Validate structure: must be Record<string, Record<string, string>>
+    if (typeof parsedMatrix !== 'object' || parsedMatrix === null || Array.isArray(parsedMatrix)) {
+      throw new Error(
+        `Dynamic matrix must resolve to an object, got: ${typeof parsedMatrix}`,
+      );
+    }
+
+    for (const [configName, configVars] of Object.entries(parsedMatrix)) {
+      if (typeof configVars !== 'object' || configVars === null || Array.isArray(configVars)) {
+        throw new Error(
+          `Dynamic matrix config "${configName}" must be an object of variables`,
+        );
+      }
+      // Coerce all values to strings (matching z.coerce.string() behavior)
+      for (const [key, value] of Object.entries(configVars)) {
+        parsedMatrix[configName][key] = String(value);
+      }
+    }
+
+    this.log(
+      prefix,
+      chalk.blue(`Dynamic matrix resolved: ${Object.keys(parsedMatrix).length} config(s)`),
+    );
+
+    strategy.matrix = parsedMatrix;
+    return strategy;
   }
 
   private async runJobInstance(

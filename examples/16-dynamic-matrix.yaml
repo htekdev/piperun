@@ -1,0 +1,94 @@
+# Dynamic matrix — generate matrix configurations at runtime from a previous job's output.
+# This mirrors Azure DevOps' pattern: matrix: $[ dependencies.Job.outputs['step.var'] ]
+#
+# Pattern: Job A runs a discovery/setup step that outputs a JSON object.
+#          Job B uses that JSON as its matrix, fanning out dynamically.
+name: Dynamic Matrix
+
+stages:
+  # ─── Same-Stage: Generate matrix from job output ───────────────────────────
+  - stage: Build
+    displayName: Dynamic Build Matrix
+    jobs:
+      # Step 1: Discover what to build
+      - job: Discover
+        displayName: Discover Components
+        steps:
+          - name: scan
+            pwsh: |
+              # In a real pipeline, this might scan a monorepo, query an API,
+              # or read a config file to determine what needs building.
+              $matrix = @{
+                auth   = @{ component = "auth";   port = "3000" }
+                api    = @{ component = "api";    port = "3001" }
+                web    = @{ component = "web";    port = "8080" }
+              } | ConvertTo-Json -Compress
+
+              Write-Host "Discovered components: $matrix"
+              Write-Host "##pipeline[setvariable variable=buildMatrix;isOutput=true]$matrix"
+            displayName: Scan for Components
+
+      # Step 2: Fan out across discovered components
+      - job: BuildComponent
+        displayName: Build
+        dependsOn: Discover
+        strategy:
+          matrix: "$[dependencies.Discover.outputs['scan.buildMatrix']]"
+          maxParallel: 2
+        steps:
+          - pwsh: |
+              Write-Host "=== Building: $env:COMPONENT ==="
+              Write-Host "Listening port: $env:PORT"
+              Write-Host "Build complete for $env:COMPONENT"
+            displayName: Build ${{ parameters.component }}
+          - name: result
+            pwsh: |
+              Write-Host "##pipeline[setvariable variable=artifact;isOutput=true]$env:COMPONENT-v1.0.0"
+            displayName: Set Build Output
+
+  # ─── Cross-Stage: Generate matrix for deployment ───────────────────────────
+  - stage: Deploy
+    displayName: Dynamic Deployment
+    dependsOn: Build
+    jobs:
+      # Determine deployment targets at runtime
+      - job: Plan
+        displayName: Plan Deployment
+        steps:
+          - name: targets
+            pwsh: |
+              # Deployment targets could come from a config service, environment
+              # variable, or infrastructure discovery
+              $deployMatrix = @{
+                staging    = @{ environment = "staging";    region = "us-east-1" }
+                production = @{ environment = "production"; region = "us-west-2" }
+              } | ConvertTo-Json -Compress
+
+              Write-Host "Deployment targets: $deployMatrix"
+              Write-Host "##pipeline[setvariable variable=deployTargets;isOutput=true]$deployMatrix"
+            displayName: Determine Deploy Targets
+
+      # Fan out deployments using cross-job output
+      - job: DeployTo
+        displayName: Deploy
+        dependsOn: Plan
+        strategy:
+          matrix: "$[dependencies.Plan.outputs['targets.deployTargets']]"
+          maxParallel: 1
+        steps:
+          - pwsh: |
+              Write-Host "Deploying to $env:ENVIRONMENT in $env:REGION"
+              Write-Host "Deployment to $env:ENVIRONMENT complete"
+            displayName: Deploy
+
+  # ─── Cross-Stage Dynamic Matrix ────────────────────────────────────────────
+  - stage: Verify
+    displayName: Verification
+    dependsOn: Deploy
+    jobs:
+      - job: HealthCheck
+        steps:
+          - pwsh: |
+              Write-Host "Running health checks against all deployed environments"
+              Write-Host "All health checks passed"
+            displayName: Health Check
