@@ -334,7 +334,21 @@ export class StageRunner {
           strategy: undefined,
         };
 
-        return this.runJobInstance(instanceJob, stageContext, pipelineContext);
+        // Fork VariableManager so concurrent instances don't corrupt each other's scopes
+        const forkedDeps: JobRunnerDeps = {
+          ...this.deps,
+          variableManager: this.deps.variableManager.fork(),
+        };
+
+        const jobRunner = new JobRunner(forkedDeps, {
+          workingDirectory: this.options.workingDirectory,
+          verbose: this.options.verbose,
+        });
+
+        this.jobRunners.push(jobRunner);
+        if (this.canceled) jobRunner.cancel();
+
+        return jobRunner.runJob(instanceJob, stageContext, pipelineContext);
       },
     );
 
@@ -455,8 +469,11 @@ export class StageRunner {
     try {
       parsedMatrix = JSON.parse(resolvedStr);
     } catch {
+      const preview = resolvedStr.length > 200
+        ? resolvedStr.substring(0, 200) + '...'
+        : resolvedStr;
       throw new Error(
-        `Dynamic matrix expression resolved to invalid JSON: ${resolvedStr}`,
+        `Dynamic matrix expression resolved to invalid JSON: ${preview}`,
       );
     }
 
@@ -467,7 +484,14 @@ export class StageRunner {
       );
     }
 
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+
     for (const [configName, configVars] of Object.entries(parsedMatrix)) {
+      if (dangerousKeys.includes(configName)) {
+        throw new Error(
+          `Dynamic matrix config name "${configName}" is not allowed`,
+        );
+      }
       if (typeof configVars !== 'object' || configVars === null || Array.isArray(configVars)) {
         throw new Error(
           `Dynamic matrix config "${configName}" must be an object of variables`,
@@ -475,6 +499,11 @@ export class StageRunner {
       }
       // Coerce all values to strings (matching z.coerce.string() behavior)
       for (const [key, value] of Object.entries(configVars)) {
+        if (dangerousKeys.includes(key)) {
+          throw new Error(
+            `Dynamic matrix variable name "${key}" in config "${configName}" is not allowed`,
+          );
+        }
         parsedMatrix[configName][key] = String(value);
       }
     }

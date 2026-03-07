@@ -100,6 +100,30 @@ export class VariableManager {
   }
 
   /**
+   * Create an isolated fork of this VariableManager.
+   * The fork gets a deep copy of the current scope stack so concurrent
+   * job instances (e.g., matrix fan-out) don't corrupt each other's scopes.
+   */
+  fork(): VariableManager {
+    const forked = new VariableManager(this.secretMasker);
+    for (const scope of this.scopeStack) {
+      const clonedVars = new Map<string, ResolvedVariable>();
+      for (const [key, resolved] of scope.variables) {
+        clonedVars.set(key, { ...resolved });
+      }
+      forked.scopeStack.push({
+        level: scope.level,
+        name: scope.name,
+        variables: clonedVars,
+      });
+    }
+    for (const [key, value] of this.canonicalNames) {
+      forked.canonicalNames.set(key, value);
+    }
+    return forked;
+  }
+
+  /**
    * Set a variable in the specified scope (defaults to current/innermost scope).
    * Throws if the variable is readonly and already set.
    */
