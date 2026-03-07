@@ -1,0 +1,55 @@
+name: Enforce Test Coverage
+description: >
+  Blocks commits to source files if any test coverage area
+  (unit, integration, E2E) falls below the configured thresholds
+  (statements: 80%, branches: 75%, functions: 80%, lines: 80%).
+on:
+  commit:
+    lifecycle: pre
+    paths:
+      - 'src/**'
+    paths-ignore:
+      - 'src/**/*.test.*'
+      - 'src/**/*.spec.*'
+blocking: true
+steps:
+  - name: Build project (required for integration/E2E)
+    run: |
+      echo "🔨 Building project..."
+      npm run build --silent
+      if [ $? -ne 0 ]; then
+        echo "❌ Build failed — cannot verify coverage"
+        exit 1
+      fi
+      echo "✅ Build succeeded"
+
+  - name: Run unit test coverage
+    run: |
+      echo "🧪 Running unit test coverage..."
+      npm run test:coverage:unit --silent 2>&1
+      if [ $? -ne 0 ]; then
+        echo "❌ Unit test coverage below thresholds (statements≥80%, branches≥75%, functions≥80%, lines≥80%)"
+        exit 1
+      fi
+      echo "✅ Unit coverage passed"
+
+  - name: Run integration test coverage
+    run: |
+      echo "🧪 Running integration test coverage..."
+      npm run test:coverage:integration --silent 2>&1
+      if [ $? -ne 0 ]; then
+        echo "❌ Integration test coverage below thresholds (statements≥80%, branches≥75%, functions≥80%, lines≥80%)"
+        exit 1
+      fi
+      echo "✅ Integration coverage passed"
+
+  - name: Run E2E test coverage
+    run: |
+      echo "🧪 Running E2E test coverage..."
+      npm run test:coverage:e2e --silent 2>&1
+      if [ $? -ne 0 ]; then
+        echo "❌ E2E test coverage below thresholds (statements≥80%, branches≥75%, functions≥80%, lines≥80%)"
+        exit 1
+      fi
+      echo "✅ E2E coverage passed"
+    timeout: 300
