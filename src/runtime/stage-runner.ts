@@ -274,6 +274,10 @@ export class StageRunner {
     }
   }
 
+  /**
+   * Run a single job, delegating to runStrategyJob if it has a matrix/parallel
+   * strategy, or runJobInstance for a standalone job.
+   */
   private async runSingleJob(
     job: RegularJobDefinition | DeploymentJobDefinition,
     stageContext: StageRunContext,
@@ -404,8 +408,12 @@ export class StageRunner {
       return [...existing, ...instanceDefs];
     }
 
-    // Existing is something else — wrap in array
-    return [...instanceDefs];
+    // Existing is Record<string, string> — convert to array form and merge
+    const existingDefs = Object.entries(existing).map(([name, value]) => ({
+      name,
+      value,
+    }));
+    return [...existingDefs, ...instanceDefs];
   }
 
   /**
@@ -517,6 +525,11 @@ export class StageRunner {
     return strategy;
   }
 
+  /**
+   * Execute a single job instance with no strategy expansion.
+   * Used for standalone jobs or individual matrix/parallel instances
+   * after strategy expansion has already occurred.
+   */
   private async runJobInstance(
     job: RegularJobDefinition | DeploymentJobDefinition,
     stageContext: StageRunContext,
@@ -573,6 +586,10 @@ export class StageRunner {
     return '__unknown';
   }
 
+  /**
+   * Build expression context for stage-level condition evaluation.
+   * Includes current variables and stage dependency outputs (via stageDependencies).
+   */
   private buildExpressionContext(
     pipelineContext: PipelineRunContext,
   ): ExpressionContext {

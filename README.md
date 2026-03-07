@@ -339,14 +339,15 @@ Supported types: `string`, `number`, `boolean`, `object`, `step`, `stepList`, `j
 
 ### Variables
 
-Variables are scoped — pipeline-level variables are available everywhere, stage-level within that stage, job-level within that job.
+Variables support two input formats and are scoped — pipeline-level variables are available everywhere, stage-level within that stage, job-level within that job.
 
 ```yaml
-# Shorthand syntax
+# Shorthand Record format — simple key-value pairs
 variables:
   globalVar: "available everywhere"
+  buildConfig: Release
 
-# Explicit syntax (supports readonly and secrets)
+# Explicit array format — supports readonly, secrets, groups, and templates
 variables:
   - name: buildConfig
     value: Release
@@ -358,6 +359,8 @@ variables:
     parameters:
       region: eastus
 ```
+
+Both formats can be used at any scope (pipeline, stage, job). The shorthand Record format is convenient for simple key-value pairs; the explicit array format is required for readonly flags, variable groups, and template includes.
 
 **System variables** are automatically available: `Pipeline.RunId`, `Pipeline.RunNumber`, `Pipeline.Name`, `Pipeline.Workspace`, `Stage.Name`, `Job.Name`, `Agent.OS`, `Agent.MachineName`, and more.
 

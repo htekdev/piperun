@@ -81,6 +81,18 @@ Temp files are created in `os.tmpdir()` and cleaned up in `finally` blocks. Outp
 
 Matrix values in YAML use `z.coerce.string()` in the schema to handle booleans/numbers. Variables are accessible in steps via environment variables (e.g., `$env:NODEVERSION` in PowerShell).
 
+**Concurrent instance isolation:** Each matrix instance gets a forked `VariableManager` (via `VariableManager.fork()`) to prevent scope stack corruption from interleaved `enterScope()`/`exitScope()` calls during parallel execution.
+
+**Dynamic matrix:** The `matrix` field can be a runtime expression string (e.g., `$[dependencies.Job.outputs['step.matrix']]`) that resolves to JSON. `resolveDynamicMatrix()` evaluates the expression, parses the JSON, validates the structure, and guards against prototype pollution (`__proto__`, `constructor`, `prototype` keys are rejected).
+
+### Variables format
+
+`VariablesInput` (src/types/pipeline.ts) accepts both formats:
+- **Shorthand Record:** `variables: { key: value }` — simple key-value pairs
+- **Explicit array:** `variables: [{ name, value, readonly }]` — full VariableDefinition objects
+
+Both are handled polymorphically by `VariableManager.loadVariables()`. The `mergeInstanceVariables()` method in stage-runner also handles both formats when merging matrix instance vars into existing job variables.
+
 ### Dependency injection pattern
 
 Runners receive their dependencies via constructor injection — `PipelineRunner.run()` takes a `conditionEvaluator` and `stepRunnerFactory`. This makes the runtime testable without spawning processes.

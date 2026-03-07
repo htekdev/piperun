@@ -4,13 +4,16 @@
 import type { VariableDefinition } from './variables';
 import type { ResourcesDefinition } from './resources';
 
+/** Variables can be specified as an array of definitions or a shorthand Record. */
+export type VariablesInput = VariableDefinition[] | Record<string, string>;
+
 // The complete pipeline definition
 export interface PipelineDefinition {
   name?: string;
   appendCommitMessageToRunName?: boolean;
   lockBehavior?: 'sequential' | 'runLatest';
   parameters?: ParameterDefinition[];
-  variables?: VariableDefinition[];
+  variables?: VariablesInput;
   resources?: ResourcesDefinition;
   stages?: StageDefinition[];
   jobs?: JobDefinition[]; // shorthand when there's only one stage
@@ -49,7 +52,7 @@ export interface StageDefinition {
   displayName?: string;
   dependsOn?: string | string[];
   condition?: string;
-  variables?: VariableDefinition[];
+  variables?: VariablesInput;
   jobs?: JobDefinition[];
   lockBehavior?: 'sequential' | 'runLatest';
   template?: string;
@@ -70,7 +73,7 @@ export interface RegularJobDefinition {
   continueOnError?: boolean;
   timeoutInMinutes?: number;
   cancelTimeoutInMinutes?: number;
-  variables?: VariableDefinition[];
+  variables?: VariablesInput;
   pool?: PoolDefinition;
   container?: string | ContainerReference;
   strategy?: JobStrategy;
@@ -87,7 +90,7 @@ export interface DeploymentJobDefinition {
   continueOnError?: boolean;
   timeoutInMinutes?: number;
   cancelTimeoutInMinutes?: number;
-  variables?: VariableDefinition[];
+  variables?: VariablesInput;
   pool?: PoolDefinition;
   environment: string | EnvironmentReference;
   strategy: DeploymentStrategy;
@@ -145,7 +148,13 @@ export interface StepTarget {
   settableVariables?: string[] | { none: boolean };
 }
 
-// Strategies
+/**
+ * Strategy for job fan-out and parallelization.
+ * - `matrix`: static configuration Record or a runtime expression string
+ *   (`$[dependencies.Job.outputs['step.matrix']]`) that resolves to JSON
+ * - `parallel`: count-based identical instance expansion
+ * - `maxParallel`: throttle concurrent instances (0 or omitted = unlimited)
+ */
 export interface JobStrategy {
   matrix?: Record<string, Record<string, string>> | string;
   parallel?: number;
