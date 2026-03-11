@@ -1,0 +1,93 @@
+# Demonstrates compile-time iteration with ${{ each }} to generate
+# pipeline structure dynamically from parameter collections.
+# Run: piperun run examples/17-each-directive.yaml --verbose
+name: Each Directive Pipeline
+
+parameters:
+  - name: regions
+    type: object
+    default:
+      - eastus
+      - westus
+      - westeurope
+
+  - name: services
+    type: object
+    default:
+      - name: api
+        port: 3000
+      - name: web
+        port: 8080
+      - name: worker
+        port: 9090
+
+  - name: envVars
+    type: object
+    default:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      ENABLE_CACHE: "true"
+
+  - name: environment
+    type: string
+    default: staging
+
+stages:
+  # Stage 1: Array iteration — generate a step per region
+  - stage: RegionalDeploy
+    jobs:
+      - job: DeployRegions
+        steps:
+          - pwsh: Write-Host "Starting regional deployment..."
+            displayName: Prepare
+
+          - ${{ each region in parameters.regions }}:
+            - pwsh: Write-Host "Deploying to ${{ region }}..."
+              displayName: Deploy ${{ region }}
+
+          - pwsh: Write-Host "All regions deployed."
+            displayName: Summary
+
+  # Stage 2: Object iteration — key/value pairs
+  - stage: ConfigReport
+    dependsOn: RegionalDeploy
+    jobs:
+      - job: PrintConfig
+        steps:
+          - pwsh: Write-Host "Environment configuration:"
+            displayName: Header
+
+          - ${{ each pair in parameters.envVars }}:
+            - pwsh: Write-Host "  ${{ pair.key }} = ${{ pair.value }}"
+              displayName: Var ${{ pair.key }}
+
+  # Stage 3: Complex objects — iterate array of objects with properties
+  - stage: ServiceBuild
+    dependsOn: ConfigReport
+    jobs:
+      - ${{ each svc in parameters.services }}:
+        - job: Build_${{ svc.name }}
+          displayName: Build ${{ svc.name }} service
+          steps:
+            - pwsh: |
+                Write-Host "Building ${{ svc.name }} service..."
+                Write-Host "  Port: ${{ svc.port }}"
+              displayName: Build ${{ svc.name }}
+
+  # Stage 4: each + if nesting — conditional logic inside loops
+  - stage: ServiceDeploy
+    dependsOn: ServiceBuild
+    jobs:
+      - job: DeployServices
+        steps:
+          - ${{ each svc in parameters.services }}:
+            - ${{ if eq(svc.name, 'worker') }}:
+              - pwsh: |
+                  Write-Host "Deploying background worker (${{ svc.name }}) on port ${{ svc.port }}..."
+                  Write-Host "  Mode: async"
+                displayName: Deploy ${{ svc.name }} (async)
+            - ${{ else }}:
+              - pwsh: |
+                  Write-Host "Deploying HTTP service (${{ svc.name }}) on port ${{ svc.port }}..."
+                  Write-Host "  Target: ${{ parameters.environment }}"
+                displayName: Deploy ${{ svc.name }}
